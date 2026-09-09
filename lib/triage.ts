@@ -6,73 +6,31 @@
  * whoever is in the room. Streamed, so text appears while it is still being
  * written rather than after a round trip.
  *
- * Two providers, selected by `TRIAGE_PROVIDER` (or inferred from whichever key
- * is present):
- *
- *  - `openrouter` - the draft's choice. Raw HTTPS + SSE against OpenRouter's
- *    chat-completions endpoint. No OpenAI SDK shim; the wire format is simple
- *    enough that a dependency would only add surface area.
- *  - `anthropic`  - the official `@anthropic-ai/sdk`, which gives typed access
- *    to adaptive thinking and effort control that OpenRouter does not expose
- *    uniformly.
- *
- * The prompt, the model, and the output contract are identical either way -
- * only the transport differs - so switching providers cannot change what the
- * clinician reads.
+ * Provider is OpenRouter, per the draft. Raw HTTPS + SSE against the
+ * chat-completions endpoint - no OpenAI SDK shim, because the wire format is
+ * small enough that a dependency would only add surface area to audit.
  *
  * The deterministic FAST protocol in `lib/fast-protocol.ts` is rendered by the
  * UI immediately and independently. This module only ever *adds* context; if
- * every provider fails, the emergency instructions are already on screen.
+ * the call fails, the emergency instructions are already on screen.
  */
 
-import Anthropic from "@anthropic-ai/sdk";
 import { fastProtocolText } from "@/lib/fast-protocol";
 import type { AnalysisResult } from "@/lib/types";
 
-/** Same model on both providers; OpenRouter namespaces it under the vendor. */
-const ANTHROPIC_MODEL = process.env.TRIAGE_MODEL ?? "claude-sonnet-4-5";
-const OPENROUTER_MODEL = process.env.TRIAGE_MODEL ?? "anthropic/claude-sonnet-4.5";
+/**
+ * OpenRouter namespaces every model by vendor, so the slug for Claude Sonnet
+ * 4.5 is `anthropic/claude-sonnet-4.5`. The `anthropic/` prefix is part of the
+ * model name on OpenRouter - it does not mean the Anthropic API is called.
+ */
+const MODEL = process.env.TRIAGE_MODEL ?? "anthropic/claude-sonnet-4.5";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-
-/**
- * Low effort on purpose. This runs on an emergency path where latency is the
- * dominant cost, the output is a short structured note rather than a reasoning
- * problem, and the safety-critical instructions are already covered by the
- * deterministic protocol. Raise it if you widen the assistant's remit.
- *
- * Anthropic-only: OpenRouter's reasoning controls are not uniform across
- * providers, so the OpenRouter path sends no effort hint rather than an
- * unverified parameter that could 400 mid-emergency.
- */
-const EFFORT = "low" as const;
-
-/**
- * Adaptive thinking and `output_config.effort` only exist on the Claude 4.6
- * generation and later. Sending either to Sonnet 4.5 or Haiku 4.5 returns a
- * 400 - which on this path means the triage panel silently degrades to static
- * text in the middle of an emergency.
- *
- * The match is therefore an allowlist, not a denylist: an unrecognised or
- * user-supplied `TRIAGE_MODEL` gets neither parameter. Omitting them is valid
- * on every Claude model, so the conservative branch is always safe.
- */
-const SUPPORTS_ADAPTIVE_EFFORT =
-  /^claude-(opus-(5|4-6|4-7|4-8)|sonnet-(5|4-6)|fable-5(-1)?|mythos-5(-1)?)\b/;
-
-function supportsAdaptiveEffort(model: string): boolean {
-  return SUPPORTS_ADAPTIVE_EFFORT.test(model);
-}
-
-/** Exposed for `scripts/verify-triage.mts`; not part of the runtime surface. */
-export const __testables = { supportsAdaptiveEffort };
 
 const MAX_TOKENS = 2000;
 
 /** Abort a stalled provider rather than leave the panel spinning. */
 const REQUEST_TIMEOUT_MS = 20000;
-
-export type TriageProvider = "anthropic" | "openrouter" | "none";
 
 const SYSTEM_PROMPT = `Anda adalah asisten triase untuk sistem skrining dini stroke berbasis kamera.
 
@@ -125,44 +83,12 @@ ATURAN AMBANG YANG TERPICU
 ${rules}`;
 }
 
-/**
- * Which provider will actually be used.
- * An explicit `TRIAGE_PROVIDER` wins; otherwise whichever key is present, with
- * OpenRouter first because naming it is a deliberate choice.
- */
-export function activeProvider(): TriageProvider {
-  const explicit = process.env.TRIAGE_PROVIDER?.toLowerCase();
-
-  if (explicit === "openrouter") {
-    return process.env.OPENROUTER_API_KEY ? "openrouter" : "none";
-  }
-  if (explicit === "anthropic") {
-    return process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN
-      ? "anthropic"
-      : "none";
-  }
-
-  if (process.env.OPENROUTER_API_KEY) return "openrouter";
-  if (process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) return "anthropic";
-  return "none";
-}
-
-/** True when some provider is configured; the route uses this to skip the call. */
+/** True when an OpenRouter key is configured. */
 export function triageAvailable(): boolean {
-  return activeProvider() !== "none";
+  return Boolean(process.env.OPENROUTER_API_KEY);
 }
 
 type Emit = (text: string) => void;
-
-/** Shared failure path: say what broke, then give the full standard protocol. */
-function emitFallback(emit: Emit, reason: string): void {
-  emit(
-    `> Asisten triase tidak tersedia (${reason}). Panduan standar ditampilkan.\n\n` +
-      fastProtocolText(),
-  );
-}
-
-// --- OpenRouter -------------------------------------------------------------
 
 /**
  * Stream from OpenRouter over SSE.
@@ -171,20 +97,20 @@ function emitFallback(emit: Emit, reason: string): void {
  * from a buffer rather than parsed per chunk - splitting naively drops tokens
  * whenever a frame straddles a TCP segment.
  */
-async function streamViaOpenRouter(result: AnalysisResult, emit: Emit): Promise<void> {
+async function streamFromOpenRouter(result: AnalysisResult, emit: Emit): Promise<void> {
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-      // Optional attribution headers OpenRouter uses for its dashboard.
+      // Optional attribution headers OpenRouter shows on its dashboard.
       ...(process.env.OPENROUTER_SITE_URL
         ? { "HTTP-Referer": process.env.OPENROUTER_SITE_URL }
         : {}),
       "X-Title": "SIPIJAR Stroke Screening",
     },
     body: JSON.stringify({
-      model: OPENROUTER_MODEL,
+      model: MODEL,
       max_tokens: MAX_TOKENS,
       stream: true,
       messages: [
@@ -237,64 +163,20 @@ async function streamViaOpenRouter(result: AnalysisResult, emit: Emit): Promise<
   if (!emitted) throw new Error("OpenRouter mengembalikan aliran kosong");
 }
 
-// --- Anthropic --------------------------------------------------------------
-
-async function streamViaAnthropic(result: AnalysisResult, emit: Emit): Promise<void> {
-  const client = new Anthropic();
-
-  // Only attach reasoning controls the target model actually accepts.
-  const reasoning = supportsAdaptiveEffort(ANTHROPIC_MODEL)
-    ? { thinking: { type: "adaptive" as const }, output_config: { effort: EFFORT } }
-    : {};
-
-  const stream = client.messages.stream({
-    model: ANTHROPIC_MODEL,
-    max_tokens: MAX_TOKENS,
-    ...reasoning,
-    system: [
-      {
-        type: "text",
-        text: SYSTEM_PROMPT,
-        // Stable across every alert - worth caching.
-        cache_control: { type: "ephemeral" },
-      },
-    ],
-    messages: [{ role: "user", content: buildUserMessage(result) }],
-  });
-
-  for await (const event of stream) {
-    if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-      emit(event.delta.text);
-    }
-  }
-
-  const final = await stream.finalMessage();
-  if (final.stop_reason === "refusal") {
-    emit(
-      "\n\n> Asisten triase tidak dapat menjawab permintaan ini. " +
-        "Panduan standar ditampilkan.\n\n" +
-        fastProtocolText(),
-    );
-  }
-}
-
-// --- Entry point ------------------------------------------------------------
-
 /**
  * Stream triage guidance as plain text chunks.
- * Falls back to the deterministic protocol on any provider failure.
+ * Falls back to the deterministic protocol on any failure.
  */
 export function streamTriage(result: AnalysisResult): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
-  const provider = activeProvider();
 
   return new ReadableStream({
     async start(controller) {
       const emit: Emit = (text) => controller.enqueue(encoder.encode(text));
 
-      if (provider === "none") {
+      if (!triageAvailable()) {
         emit(
-          "> Asisten triase AI tidak aktif (kredensial belum diatur). " +
+          "> Asisten triase AI tidak aktif (OPENROUTER_API_KEY belum diatur). " +
             "Panduan standar ditampilkan.\n\n" +
             fastProtocolText(),
         );
@@ -303,23 +185,18 @@ export function streamTriage(result: AnalysisResult): ReadableStream<Uint8Array>
       }
 
       try {
-        if (provider === "openrouter") {
-          await streamViaOpenRouter(result, emit);
-        } else {
-          await streamViaAnthropic(result, emit);
-        }
+        await streamFromOpenRouter(result, emit);
       } catch (error) {
-        let reason: string;
-        if (error instanceof Anthropic.APIError) {
-          reason = `galat API ${error.status}`;
-        } else if (error instanceof DOMException && error.name === "TimeoutError") {
-          reason = "waktu tunggu habis";
-        } else if (error instanceof Error) {
-          reason = error.message;
-        } else {
-          reason = "galat jaringan";
-        }
-        emitFallback(emit, reason);
+        const reason =
+          error instanceof DOMException && error.name === "TimeoutError"
+            ? "waktu tunggu habis"
+            : error instanceof Error
+              ? error.message
+              : "galat jaringan";
+        emit(
+          `> Asisten triase tidak tersedia (${reason}). Panduan standar ditampilkan.\n\n` +
+            fastProtocolText(),
+        );
       } finally {
         controller.close();
       }

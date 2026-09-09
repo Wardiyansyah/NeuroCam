@@ -67,37 +67,27 @@ landmark tidak bisa dijalankan dari data ini — lihat penyimpangan 3.
 Jalur WebRTC → GPU tetap tersedia: isi `INFERENCE_SERVER_URL` dan ekstraksi
 metrik didelegasikan ke layanan eksternal (kontrak di `lib/inference.ts`).
 
-### 2. Nama model diperbarui (OpenRouter tetap sesuai draft)
+### 2. Nama model diperbarui
 
-Draft menyebut OpenRouter dengan "Claude 4.5 Sonnet". Nama model tersebut sudah
-usang — implementasi memakai **`claude-opus-5`**.
+Draft menyebut "Claude 4.5 Sonnet" lewat OpenRouter. Penyedianya tetap
+**OpenRouter** sesuai draft; hanya nama modelnya yang dibakukan ke slug yang
+benar-benar ada di katalog OpenRouter:
 
-OpenRouter **tetap didukung sepenuhnya** sesuai draft, berdampingan dengan
-Anthropic API resmi. Penyedia dipilih lewat `TRIAGE_PROVIDER`, atau otomatis
-dari kunci yang tersedia (OpenRouter didahulukan):
+```
+anthropic/claude-sonnet-4.5
+```
 
-| `TRIAGE_PROVIDER` | Kunci                | Model default                   |
-| ----------------- | -------------------- | ------------------------------- |
-| `openrouter`      | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4.5`   |
-| `anthropic`       | `ANTHROPIC_API_KEY`  | `claude-sonnet-4-5`             |
-| *(tidak ada)*     | —                    | protokol FAST statis            |
+Awalan `anthropic/` adalah cara OpenRouter memberi *namespace* vendor pada nama
+model — setiap model di sana ditulis `vendor/model`. Itu **bukan** berarti API
+Anthropic yang dipanggil. Satu-satunya endpoint yang dihubungi aplikasi ini
+adalah `https://openrouter.ai/api/v1/chat/completions`, dan satu-satunya
+kredensial yang dibaca adalah `OPENROUTER_API_KEY`.
 
-Ganti model lewat `TRIAGE_MODEL`. **Parameter penalaran menyesuaikan model
-secara otomatis:** adaptive thinking dan `output_config.effort` hanya ada pada
-generasi Claude 4.6 ke atas — mengirimkannya ke Sonnet 4.5 menghasilkan HTTP
-400, yang di jalur ini berarti panel triase diam-diam turun ke teks statis di
-tengah keadaan darurat. Pengecekannya berupa *allowlist*, sehingga model yang
-tidak dikenali pun mengambil cabang aman (kedua parameter dihilangkan).
+Ganti model lewat `TRIAGE_MODEL` bila perlu.
 
-Prompt, model, dan kontrak keluaran identik pada kedua jalur — hanya
-transportnya yang berbeda — sehingga mengganti penyedia tidak dapat mengubah
-apa yang dibaca klinisi.
-
-Jalur OpenRouter memakai HTTPS + SSE langsung, bukan shim OpenAI SDK. Satu
-perbedaan yang disengaja: kontrol *effort*/*thinking* hanya dikirim pada jalur
-Anthropic, karena parameter penalaran OpenRouter tidak seragam antar penyedia
-dan parameter yang tidak terverifikasi berisiko menghasilkan 400 di tengah
-keadaan darurat.
+Transportnya HTTPS + SSE langsung, tanpa shim OpenAI SDK — format kabelnya cukup
+sederhana sehingga menambah dependensi hanya memperluas permukaan yang harus
+diaudit.
 
 ### 3. Skor asimetri adalah proksi fotometrik, bukan Action Unit sungguhan
 
@@ -221,7 +211,7 @@ lib/
   signal/stats.ts             Detrend, Hann, luminansi
   thresholds.ts               Aturan krisis (langkah 4)
   inference.ts                Orkestrasi + jalur GPU RunPod opsional
-  triage.ts                   OpenRouter / Anthropic, streaming
+  triage.ts                   Panggilan OpenRouter, streaming SSE
   fast-protocol.ts            Panduan FAST deterministik
   store.ts                    Sesi + insiden (antarmuka Redis/Supabase)
 
@@ -246,10 +236,10 @@ scripts/
   sintetis ber-*ground truth*: pemulihan detak jantung 55–124 bpm, gerbang
   derau, gerbang wajah hilang, diskriminasi asimetri, pembatalan baseline, dan
   seluruh transisi status ambang batas.
-- **`scripts/verify-triage.mts`** — 21 pemeriksaan lapisan triase: pemilihan
-  penyedia, perakitan ulang SSE OpenRouter melintasi batas chunk (diuji dengan
-  potongan 7 byte), fallback ke protokol FAST pada HTTP 429/500, galat jaringan
-  dan aliran kosong, serta penyesuaian parameter penalaran per model.
+- **`scripts/verify-triage.mts`** — pemeriksaan lapisan triase: perakitan ulang
+  SSE OpenRouter melintasi batas chunk (diuji dengan potongan 7 byte), dan
+  fallback ke protokol FAST pada HTTP 429/500, galat jaringan, aliran kosong,
+  serta kunci yang belum diatur.
 
 Perlu diingat data sintetis bersifat ideal — tanpa artefak gerakan, tanpa
 perubahan pencahayaan, tanpa variasi warna kulit. Lulus di sini berarti

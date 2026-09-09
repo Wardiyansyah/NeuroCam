@@ -3,9 +3,9 @@
  *
  * DESIGN RULE: emergency instructions never depend on a network call. The LLM
  * triage layer enriches this text with the specific metrics, but if OpenRouter
- * or the Anthropic API is slow, rate-limited, or unreachable, the patient and
- * family still get complete first-response steps immediately. The LLM is an
- * enhancement on top of this, never a prerequisite for it.
+ * is slow, rate-limited, or unreachable, the patient and family still get
+ * complete first-response steps immediately. The LLM is an enhancement on top
+ * of this, never a prerequisite for it.
  */
 
 export const EMERGENCY_NUMBER = "119";
