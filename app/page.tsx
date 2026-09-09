@@ -1,69 +1,175 @@
-import Image from "next/image";
+import Link from "next/link";
+import { CALIBRATION_SECONDS, CRISIS_WINDOW_SECONDS, PULSE_WINDOW_SECONDS } from "@/lib/store";
+import { THRESHOLDS } from "@/lib/thresholds";
+
+const PIPELINE = [
+  {
+    step: "1",
+    title: "Inisiasi sesi",
+    body: "Peramban meminta izin kamera dan membuka sesi pemantauan bernomor acak. Tidak ada akun, tidak ada identitas.",
+  },
+  {
+    step: "2",
+    title: "Reduksi bingkai di perangkat",
+    body: "Tiap bingkai dipetakan ke sembilan region wajah dan direduksi menjadi rata-rata warna. Piksel dibuang seketika.",
+  },
+  {
+    step: "3",
+    title: "Ekstraksi metrik fisiologis",
+    body: `Sinyal pulsa dipulihkan dengan metode CHROM pada jendela ${PULSE_WINDOW_SECONDS} detik, lalu spektrum daya menentukan detak jantung.`,
+  },
+  {
+    step: "4",
+    title: "Evaluasi ambang batas",
+    body: `Agregasi ${CRISIS_WINDOW_SECONDS} detik terakhir. Bila fluktuasi detak jantung dan asimetri wajah terlampaui bersamaan, status menjadi Kritis.`,
+  },
+  {
+    step: "5",
+    title: "Asisten triase",
+    body: "Metrik anomali dikirim ke Claude untuk menyusun ringkasan klinis dan langkah pertama. Panduan FAST statis selalu tampil lebih dulu.",
+  },
+];
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <main className="mx-auto w-full max-w-6xl px-6 py-12">
+      {/* --- Hero --------------------------------------------------------- */}
+      <section className="max-w-3xl">
+        <p className="text-xs font-semibold uppercase tracking-widest text-accent">
+          Pemantauan nirsentuh berbasis citra wajah
+        </p>
+        <h1 className="mt-3 text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
+          Skrining dini potensi stroke lewat kamera biasa
+        </h1>
+        <p className="mt-4 text-base leading-relaxed text-muted">
+          SIPIJAR memantau dua indikator sekaligus: anomali hemodinamik melalui
+          fotopletismografi jarak jauh (rPPG) dan asimetri wajah kritis melalui
+          analisis pergerakan sisi kiri dan kanan. Ketika keduanya melewati ambang
+          batas secara bersamaan, sistem memunculkan peringatan dan panduan
+          penanganan pertama.
+        </p>
+
+        <div className="mt-7 flex flex-wrap gap-3">
+          <Link
+            href="/monitor"
+            className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90"
+          >
+            Mulai pemantauan
+          </Link>
+          <Link
+            href="/dashboard"
+            className="rounded-lg border border-border-subtle bg-surface px-5 py-2.5 text-sm font-medium transition-colors hover:bg-surface-muted"
+          >
+            Lihat dasbor insiden
+          </Link>
+        </div>
+      </section>
+
+      {/* --- Safety notice ------------------------------------------------ */}
+      <section className="mt-10 rounded-xl border border-status-warning/40 bg-status-warning-bg p-5">
+        <h2 className="text-sm font-semibold">Batasan yang perlu Anda ketahui</h2>
+        <ul className="mt-2.5 space-y-1.5 text-sm leading-relaxed">
+          <li>
+            Sistem ini <strong>belum divalidasi secara klinis</strong> dan bukan alat
+            diagnosis. Tidak ada penelitian yang menetapkan bahwa kombinasi rPPG dan
+            asimetri fotometrik dapat mendeteksi stroke secara andal.
+          </li>
+          <li>
+            Status <strong>Normal bukan jaminan</strong>. Stroke dapat terjadi tanpa
+            perubahan yang tertangkap kamera. Jangan pernah menunda panggilan darurat
+            karena sistem menampilkan Normal.
+          </li>
+          <li>
+            Bila wajah tidak terlacak, sistem menampilkan{" "}
+            <strong>Sinyal Hilang</strong>, bukan Normal — ketidaktahuan tidak pernah
+            disamarkan sebagai kabar baik.
+          </li>
+        </ul>
+      </section>
+
+      {/* --- Pipeline ----------------------------------------------------- */}
+      <section className="mt-14">
+        <h2 className="text-lg font-semibold tracking-tight">Alur kerja sistem</h2>
+        <ol className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {PIPELINE.map((item) => (
+            <li
+              key={item.step}
+              className="rounded-xl border border-border-subtle bg-surface p-5"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+              <span
+                aria-hidden="true"
+                className="grid h-7 w-7 place-items-center rounded-md bg-surface-muted text-xs font-bold text-accent"
+              >
+                {item.step}
+              </span>
+              <h3 className="mt-3 text-sm font-semibold">{item.title}</h3>
+              <p className="mt-1.5 text-sm leading-relaxed text-muted">{item.body}</p>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      {/* --- Privacy ------------------------------------------------------ */}
+      <section className="mt-14 grid gap-6 lg:grid-cols-2">
+        <div className="rounded-xl border border-border-subtle bg-surface p-6">
+          <h2 className="text-lg font-semibold tracking-tight">Privacy by design</h2>
+          <dl className="mt-4 space-y-4 text-sm">
+            <div>
+              <dt className="font-medium">Reduksi di perangkat</dt>
+              <dd className="mt-1 leading-relaxed text-muted">
+                Draft awal mengirim video ke peladen lalu menghapusnya dari RAM dalam
+                hitungan milidetik. Implementasi ini melangkah lebih jauh: video tidak
+                pernah dikirim sama sekali. Yang menyeberang jaringan hanya sekitar 27
+                angka per bingkai.
+              </dd>
+            </div>
+            <div>
+              <dt className="font-medium">Anonimisasi peringatan</dt>
+              <dd className="mt-1 leading-relaxed text-muted">
+                Insiden yang tersimpan hanya berisi angka metrik dan stempel waktu —
+                misalnya HR_Spike dan Asymmetry_AU12 — tanpa identitas maupun gambar.
+              </dd>
+            </div>
+            <div>
+              <dt className="font-medium">Tidak ada berkas video</dt>
+              <dd className="mt-1 leading-relaxed text-muted">
+                Tidak ada MP4 atau format serupa yang ditulis ke penyimpanan, karena
+                tidak ada bingkai yang pernah sampai ke peladen.
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        <div className="rounded-xl border border-border-subtle bg-surface p-6">
+          <h2 className="text-lg font-semibold tracking-tight">Ambang batas aktif</h2>
+          <p className="mt-1.5 text-sm leading-relaxed text-muted">
+            Seluruh nilai berikut dapat diatur lewat variabel lingkungan. Angka bawaan
+            adalah heuristik skrining yang dipilih agar mudah dibaca dan disetel, bukan
+            hasil validasi klinis.
           </p>
+          <dl className="mt-4 space-y-2 text-sm">
+            {[
+              ["Jendela evaluasi", `${THRESHOLDS.windowSeconds} detik`],
+              ["Lonjakan detak jantung", `±${THRESHOLDS.hrSpikePct}% dari baseline`],
+              [
+                "Rentang absolut detak jantung",
+                `${THRESHOLDS.hrAbsoluteMin}–${THRESHOLDS.hrAbsoluteMax} bpm`,
+              ],
+              ["Asimetri — peringatan", `${THRESHOLDS.asymmetryWarn} / 100`],
+              ["Asimetri — kritis", `${THRESHOLDS.asymmetryCritical} / 100`],
+              ["Durasi kalibrasi", `${CALIBRATION_SECONDS} detik`],
+            ].map(([label, value]) => (
+              <div
+                key={label}
+                className="flex items-baseline justify-between gap-4 border-b border-border-subtle pb-2 last:border-0"
+              >
+                <dt className="text-muted">{label}</dt>
+                <dd className="tnum font-medium">{value}</dd>
+              </div>
+            ))}
+          </dl>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      </section>
+    </main>
   );
 }

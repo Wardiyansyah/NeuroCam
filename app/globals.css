@@ -1,26 +1,109 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/*
+ * Palette is deliberately restrained: one accent, and four status colours that
+ * carry the only meaning that matters on a monitoring screen. Status is never
+ * encoded in colour alone - every state also carries a label and an icon glyph,
+ * because a red-green distinction is exactly the one a colour-blind clinician
+ * cannot make under time pressure.
+ */
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+:root {
+  --background: #f7f8fa;
+  --surface: #ffffff;
+  --surface-muted: #f1f3f7;
+  --border: #dfe3ea;
+  --foreground: #0e1420;
+  --muted: #5a6478;
+
+  --accent: #1f6feb;
+
+  --status-normal: #0b8a5a;
+  --status-warning: #b26a00;
+  --status-critical: #c62222;
+  --status-idle: #5a6478;
+  --status-calibrating: #1f6feb;
+
+  --status-normal-bg: #e6f6ee;
+  --status-warning-bg: #fdf3e0;
+  --status-critical-bg: #fdeaea;
+  --status-idle-bg: #eef0f4;
+  --status-calibrating-bg: #e8f1fe;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0a0d14;
+    --surface: #121722;
+    --surface-muted: #1a2130;
+    --border: #262f40;
+    --foreground: #e9edf5;
+    --muted: #98a3b8;
+
+    --accent: #5b9bff;
+
+    --status-normal: #3fd39a;
+    --status-warning: #f5b24a;
+    --status-critical: #ff6b6b;
+    --status-idle: #98a3b8;
+    --status-calibrating: #5b9bff;
+
+    --status-normal-bg: #0f2a20;
+    --status-warning-bg: #2e2311;
+    --status-critical-bg: #35161a;
+    --status-idle-bg: #1a2130;
+    --status-calibrating-bg: #14243d;
   }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-border-subtle: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+
+  --color-status-normal: var(--status-normal);
+  --color-status-warning: var(--status-warning);
+  --color-status-critical: var(--status-critical);
+  --color-status-idle: var(--status-idle);
+  --color-status-calibrating: var(--status-calibrating);
+
+  --color-status-normal-bg: var(--status-normal-bg);
+  --color-status-warning-bg: var(--status-warning-bg);
+  --color-status-critical-bg: var(--status-critical-bg);
+  --color-status-idle-bg: var(--status-idle-bg);
+  --color-status-calibrating-bg: var(--status-calibrating-bg);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Critical-state pulse. Suppressed under reduced-motion, where the red field
+   and the label already carry the alarm. */
+@keyframes alert-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.alert-pulse {
+  animation: alert-pulse 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .alert-pulse {
+    animation: none;
+  }
+}
+
+/* Tabular figures keep live metrics from shifting width as digits change. */
+.tnum {
+  font-variant-numeric: tabular-nums;
 }

@@ -1,36 +1,282 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SIPIJAR — Skrining Dini Potensi Stroke Berbasis Citra Wajah
 
-## Getting Started
+Implementasi draft "Pendeteksi dini potensi stroke berdasarkan citra wajah berbasis AI"
+di atas Next.js 16 (App Router, Turbopack, React 19).
 
-First, run the development server:
+> [!WARNING]
+> **Bukan alat diagnosis dan belum divalidasi secara klinis.**
+> Tidak ada bukti yang menetapkan bahwa kombinasi rPPG dan asimetri fotometrik
+> dapat mendeteksi stroke secara andal. Status `Normal` **tidak** menyingkirkan
+> kemungkinan stroke. Gunakan sebagai prototipe rekayasa, bukan sebagai dasar
+> keputusan medis. Bila ada gejala, hubungi **119** atau **112**.
+
+---
+
+## Menjalankan
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev          # http://localhost:3000
+npm run verify       # verifikasi pipeline sinyal terhadap data sintetis
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Kamera memerlukan origin aman: `localhost` sudah aman, host lain butuh HTTPS.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Salin `.env.example` ke `.env.local` bila ingin mengaktifkan asisten triase atau
+inference server. **Aplikasi berjalan penuh tanpa satu pun variabel diisi.**
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## Halaman
 
-To learn more about Next.js, take a look at the following resources:
+| Rute         | Isi                                                                      |
+| ------------ | ------------------------------------------------------------------------ |
+| `/`          | Ringkasan sistem, alur kerja, batasan, dan ambang batas yang sedang aktif |
+| `/monitor`   | Sesi pemantauan langsung + panduan FAST                                   |
+| `/dashboard` | Riwayat insiden teranonimisasi                                            |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## API
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Endpoint         | Metode   | Fungsi                                                    |
+| ---------------- | -------- | --------------------------------------------------------- |
+| `/api/session`   | `POST`   | Membuka sesi, mengembalikan `sessionId`                    |
+| `/api/session`   | `DELETE` | Menutup sesi (`?id=`)                                      |
+| `/api/analyze`   | `POST`   | Menerima batch bingkai tereduksi, mengembalikan status     |
+| `/api/triage`    | `POST`   | Streaming panduan triase (`text/plain`)                    |
+| `/api/incidents` | `GET`    | Daftar insiden teranonimisasi                              |
 
-## Deploy on Vercel
+---
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Tiga penyimpangan dari draft — dan alasannya
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Sisanya mengikuti draft. Tiga hal ini sengaja berbeda:
+
+### 1. Video tidak dikirim ke peladen sama sekali
+
+Draft merancang WebRTC → peladen GPU, lalu menghapus video dari RAM dalam
+hitungan milidetik. Implementasi ini **mereduksi bingkai di dalam peramban**:
+tiap frame dipetakan ke sembilan region wajah, direduksi menjadi rata-rata warna
+RGB, lalu pikselnya dibuang. Yang menyeberang jaringan hanya ~27 angka per
+bingkai (±5 KB/detik) — bukan video.
+
+Ini **lebih kuat** daripada tujuan privasi draft, bukan lebih lemah: tidak ada
+video mentah yang bisa bocor, ter-buffer di proxy, atau lupa dihapus, karena
+tidak pernah ada video yang dikirim. Konsekuensinya, model AU penuh berbasis
+landmark tidak bisa dijalankan dari data ini — lihat penyimpangan 3.
+
+Jalur WebRTC → GPU tetap tersedia: isi `INFERENCE_SERVER_URL` dan ekstraksi
+metrik didelegasikan ke layanan eksternal (kontrak di `lib/inference.ts`).
+
+### 2. Nama model diperbarui (OpenRouter tetap sesuai draft)
+
+Draft menyebut OpenRouter dengan "Claude 4.5 Sonnet". Nama model tersebut sudah
+usang — implementasi memakai **`claude-opus-5`**.
+
+OpenRouter **tetap didukung sepenuhnya** sesuai draft, berdampingan dengan
+Anthropic API resmi. Penyedia dipilih lewat `TRIAGE_PROVIDER`, atau otomatis
+dari kunci yang tersedia (OpenRouter didahulukan):
+
+| `TRIAGE_PROVIDER` | Kunci                | Model default                   |
+| ----------------- | -------------------- | ------------------------------- |
+| `openrouter`      | `OPENROUTER_API_KEY` | `anthropic/claude-sonnet-4.5`   |
+| `anthropic`       | `ANTHROPIC_API_KEY`  | `claude-sonnet-4-5`             |
+| *(tidak ada)*     | —                    | protokol FAST statis            |
+
+Ganti model lewat `TRIAGE_MODEL`. **Parameter penalaran menyesuaikan model
+secara otomatis:** adaptive thinking dan `output_config.effort` hanya ada pada
+generasi Claude 4.6 ke atas — mengirimkannya ke Sonnet 4.5 menghasilkan HTTP
+400, yang di jalur ini berarti panel triase diam-diam turun ke teks statis di
+tengah keadaan darurat. Pengecekannya berupa *allowlist*, sehingga model yang
+tidak dikenali pun mengambil cabang aman (kedua parameter dihilangkan).
+
+Prompt, model, dan kontrak keluaran identik pada kedua jalur — hanya
+transportnya yang berbeda — sehingga mengganti penyedia tidak dapat mengubah
+apa yang dibaca klinisi.
+
+Jalur OpenRouter memakai HTTPS + SSE langsung, bukan shim OpenAI SDK. Satu
+perbedaan yang disengaja: kontrol *effort*/*thinking* hanya dikirim pada jalur
+Anthropic, karena parameter penalaran OpenRouter tidak seragam antar penyedia
+dan parameter yang tidak terverifikasi berisiko menghasilkan 400 di tengah
+keadaan darurat.
+
+### 3. Skor asimetri adalah proksi fotometrik, bukan Action Unit sungguhan
+
+Draft menyebut "analisis Action Units". AU sungguhan memerlukan landmark wajah
+atau model AU terlatih. Yang berjalan lokal di sini membandingkan **dinamika
+luminansi sisi kiri dan kanan** untuk tiap pasang region — seberapa banyak tiap
+sisi *bergerak*, dan bagaimana tiap sisi *terbayang* relatif terhadap pipi di
+sisi yang sama.
+
+Nama `AU12`/`AU6`/`AU4` dipakai untuk menyebut AU yang **diwakili**, bukan yang
+**diukur**. Model AU penuh adalah tugas inference server pada penyimpangan 1.
+
+Dua perancu ditangani eksplisit:
+
+- **Pencahayaan samping** — tiap fitur dinormalisasi terhadap pipi di sisinya
+  sendiri, sehingga gradien cahaya kiri-kanan saling meniadakan.
+- **Asimetri bawaan** — tidak ada wajah yang simetris. Skor hanya bermakna
+  sebagai **kelebihan di atas baseline pribadi** yang direkam saat kalibrasi.
+
+### 4. Polling, bukan WebSocket
+
+Dasbor melakukan polling `/api/incidents` tiap 5 detik alih-alih berlangganan
+WSS. Data identik, tanpa perlu mengoperasikan socket server. Titik penggantinya
+ada di `components/incident-table.tsx`.
+
+---
+
+## Cara kerja pipeline
+
+### rPPG — metode CHROM
+
+`lib/signal/rppg.ts` memulihkan sinyal pulsa memakai CHROM (de Haan & Jeanne,
+2013), bukan kanal hijau mentah: pulsa hidup di subruang krominansi tempat
+pantulan spekular sebagian besar saling meniadakan, sehingga jauh lebih tahan
+terhadap gerakan dan variasi warna kulit.
+
+```
+resample seragam → normalisasi per kanal → proyeksi krominansi
+  → detrend → jendela Hann → FFT → puncak dalam 0,7–4,0 Hz
+```
+
+Resampling penting: pengiriman bingkai peramban ber-jitter, dan FFT yang
+mengasumsikan jarak seragam pada input ber-jitter akan mengaburkan puncak pulsa.
+SNR memakai definisi de Haan — energi di frekuensi pulsa dan harmonik keduanya,
+dibandingkan sisa pita.
+
+### Dua jendela waktu
+
+Draft menyebut agregasi 5 detik. Implementasi memakai dua jendela karena
+resolusi frekuensi berbanding lurus dengan panjang jendela — 5 detik tidak dapat
+memisahkan 70 dari 76 bpm:
+
+| Jendela      | Durasi | Dipakai untuk                         |
+| ------------ | ------ | ------------------------------------- |
+| Pulsa        | 10 s   | Estimasi detak jantung                |
+| Krisis       | 5 s    | Asimetri + keputusan status (sesuai draft) |
+| Retensi      | 12 s   | Buffer sesi                           |
+| Kalibrasi    | 20 s   | Baseline HR dan asimetri pribadi      |
+
+### Jalur RunPod (opsional)
+
+Ekstraksi metrik dapat didelegasikan ke peladen GPU sesuai draft. Isi
+`INFERENCE_SERVER_URL`, dan `lib/inference.ts` akan memanggil:
+
+```
+POST {INFERENCE_SERVER_URL}/extract
+Authorization: Bearer {INFERENCE_SERVER_TOKEN}
+
+  → { "fps": 30, "samples": [ { "t": 0, "faceFound": true,
+                                "roi": { "forehead": [r,g,b], ... } }, ... ] }
+
+  ← { "bpm": 72 | null,
+      "snrDb": 11.6,
+      "quality": "good" | "fair" | "poor",
+      "asymmetry": { "mouth": 0, "eye": 0, "brow": 0, "overall": 0 } }
+```
+
+Peladen Python-nya **belum disertakan** di repositori ini — yang ada adalah sisi
+kliennya: kontrak, autentikasi bearer, timeout 2 detik, dan *fallback* otomatis
+ke ekstraksi CHROM lokal bila peladen lambat, gagal, atau sedang *cold start*.
+Sesi pemantauan tidak boleh buta hanya karena worker GPU baru bangun.
+
+Perhatikan bahwa yang dikirim ke peladen tetap sampel ROI tereduksi, bukan
+video. Untuk menjalankan model AU berbasis landmark seperti pada draft, jalur
+transport perlu diubah agar mengirim bingkai — dan itu mengembalikan
+kompromi privasi yang dijelaskan pada penyimpangan 1.
+
+### Gerbang sinyal mendahului semua aturan
+
+Kualitas sinyal buruk menghasilkan `signal_lost`, **bukan** `normal`. Membaca
+"tidak ada anomali" dari pelacakan wajah yang hilang adalah mode kegagalan yang
+benar-benar membahayakan, jadi ketidaktahuan tidak pernah disamarkan sebagai
+kabar baik. Lihat `lib/thresholds.ts`.
+
+### Panduan darurat tidak pernah bergantung pada jaringan
+
+`lib/fast-protocol.ts` bersifat statis dan dirender di server, sudah ada di
+markup sebelum JavaScript berjalan. Bila API triase lambat, kena rate limit,
+atau tidak terjangkau, protokol FAST dan langkah pertama tetap tampil. LLM hanya
+memperkaya, tidak pernah menjadi prasyarat.
+
+---
+
+## Struktur
+
+```
+app/
+  page.tsx                    Beranda
+  monitor/page.tsx            Sesi pemantauan
+  dashboard/page.tsx          Dasbor insiden
+  api/session/route.ts        Siklus hidup sesi          (langkah 1)
+  api/analyze/route.ts        Ekstraksi + evaluasi       (langkah 3-4)
+  api/triage/route.ts         Asisten triase streaming   (langkah 5)
+  api/incidents/route.ts      Riwayat teranonimisasi
+
+lib/
+  capture.ts                  Reduksi bingkai di peramban (langkah 2)
+  signal/rppg.ts              CHROM + FFT → detak jantung
+  signal/asymmetry.ts         Proksi asimetri kiri-kanan
+  signal/fft.ts               FFT radix-2
+  signal/stats.ts             Detrend, Hann, luminansi
+  thresholds.ts               Aturan krisis (langkah 4)
+  inference.ts                Orkestrasi + jalur GPU RunPod opsional
+  triage.ts                   OpenRouter / Anthropic, streaming
+  fast-protocol.ts            Panduan FAST deterministik
+  store.ts                    Sesi + insiden (antarmuka Redis/Supabase)
+
+components/
+  monitor-client.tsx          Kamera, loop tangkap, tampilan metrik
+  incident-table.tsx          Umpan insiden langsung
+  fast-panel.tsx              Panduan darurat statis
+  metric-card.tsx             Kartu metrik dan bilah indeks
+
+scripts/
+  verify-signals.ts           Verifikasi pipeline sinyal
+  verify-triage.mts           Verifikasi lapisan triase (npm run verify)
+```
+
+---
+
+## Verifikasi
+
+`npm run verify` menjalankan dua rangkaian:
+
+- **`scripts/verify-signals.ts`** — 21 pemeriksaan pipeline terhadap sinyal
+  sintetis ber-*ground truth*: pemulihan detak jantung 55–124 bpm, gerbang
+  derau, gerbang wajah hilang, diskriminasi asimetri, pembatalan baseline, dan
+  seluruh transisi status ambang batas.
+- **`scripts/verify-triage.mts`** — 21 pemeriksaan lapisan triase: pemilihan
+  penyedia, perakitan ulang SSE OpenRouter melintasi batas chunk (diuji dengan
+  potongan 7 byte), fallback ke protokol FAST pada HTTP 429/500, galat jaringan
+  dan aliran kosong, serta penyesuaian parameter penalaran per model.
+
+Perlu diingat data sintetis bersifat ideal — tanpa artefak gerakan, tanpa
+perubahan pencahayaan, tanpa variasi warna kulit. Lulus di sini berarti
+matematikanya benar, **bukan** bahwa sistem akurat pada pasien sungguhan.
+
+---
+
+## Sebelum menyentuh produksi
+
+- **`lib/store.ts` menyimpan di memori proses.** Pada deployment serverless atau
+  multi-instance, sesi akan tersebar dan jendela bergulir rusak. Ganti dengan
+  Redis dan Supabase — antarmukanya sudah didefinisikan.
+- **Tidak ada autentikasi.** Dasbor insiden terbuka bagi siapa pun yang tahu
+  URL-nya. Data memang teranonimisasi, tetapi tetap perlu dibatasi.
+- **Tidak ada rate limiting** pada `/api/analyze` maupun `/api/triage`.
+- **Ambang batas belum divalidasi.** Seluruh angka di `lib/thresholds.ts` adalah
+  heuristik yang dipilih agar mudah dibaca. Sensitivitas dan spesifisitas
+  sesungguhnya tidak diketahui dan hanya dapat ditetapkan lewat studi klinis.
+- **Gerbang deteksi kulit** memakai ambang tetap di ruang YCbCr. Ini lebih tahan
+  variasi warna kulit dibanding aturan RGB klasik, tetapi tidak ada ambang tetap
+  yang benar-benar netral untuk semua warna kulit.
+
+## Mendemonstrasikan jalur peringatan
+
+Turunkan ambang batas lewat variabel lingkungan agar status kritis mudah dipicu
+tanpa menunggu kejadian sungguhan:
+
+```bash
+STROKE_ASYMMETRY_WARN=2 STROKE_ASYMMETRY_CRITICAL=4 STROKE_HR_SPIKE_PCT=3 npm run dev
+```
