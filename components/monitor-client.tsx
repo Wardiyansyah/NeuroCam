@@ -75,7 +75,7 @@ export function MonitorClient() {
   >(null);
 
   const status: MonitorStatus =
-    phase === "running" ? (result?.status ?? "calibrating") : "idle";
+    phase === "running" ? (result?.status ?? "calibrating") : (result?.status ?? "idle");
   const display = STATUS_DISPLAY[status];
 
   const autoStop = useCallback((reason: "signal_quality" | "extreme_spike") => {
@@ -241,6 +241,10 @@ export function MonitorClient() {
 
   const start = useCallback(async () => {
     setError(null);
+    setResult(null);
+    setTriage("");
+    setAutoStopReason(null);
+    triagedIncidentRef.current = null;
     setPhase("starting");
 
     try {
