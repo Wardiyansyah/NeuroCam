@@ -51,6 +51,17 @@ Aturan yang mengikat:
 - Jika kualitas sinyal rendah, katakan eksplisit bahwa pengukuran tidak dapat diandalkan dan penilaian klinis langsung tetap menentukan.
 - Maksimal 250 kata total.`;
 
+const SUMMARY_SYSTEM_PROMPT = `Anda adalah asisten yang membuat kesimpulan pemantauan sinyal wajah dan hemodinamik.
+Tulis dalam Bahasa Indonesia, maksimal 180 kata, dengan tepat dua bagian Markdown:
+
+## Kesimpulan Pemantauan
+Tiga sampai lima poin yang menyebutkan durasi pemantauan, kualitas sinyal, dan metrik rata-rata yang tersedia.
+
+## Catatan Keterbatasan
+Dua atau tiga poin singkat yang menegaskan bahwa ini bukan diagnosis dan bahwa penilaian klinis langsung tetap diperlukan.
+
+Jangan mengarang angka atau menyatakan sistem dapat memastikan maupun menyingkirkan stroke.`;
+
 function buildUserMessage(result: AnalysisResult): string {
   const h = result.hemodynamic;
   const a = result.asymmetry;
@@ -79,6 +90,13 @@ METRIK ASIMETRI WAJAH (proksi fotometrik, kelebihan di atas baseline pribadi, sk
 - Alis (proksi AU4): ${a.brow}
 - Kualitas sinyal: ${a.quality}
 
+METRIK RATA-RATA SELAMA SESI
+- Jumlah evaluasi: ${result.averages.samples}
+- Detak jantung rata-rata: ${result.averages.bpm ?? "tidak terukur"} bpm
+- Asimetri rata-rata: ${result.averages.asymmetryOverall}/100
+- Mulut/mata/alis rata-rata: ${result.averages.asymmetryMouth}/${result.averages.asymmetryEye}/${result.averages.asymmetryBrow}
+- SNR rata-rata: ${result.averages.snrDb} dB
+
 ATURAN AMBANG YANG TERPICU
 ${rules}`;
 }
@@ -97,7 +115,11 @@ type Emit = (text: string) => void;
  * from a buffer rather than parsed per chunk - splitting naively drops tokens
  * whenever a frame straddles a TCP segment.
  */
-async function streamFromOpenRouter(result: AnalysisResult, emit: Emit): Promise<void> {
+async function streamFromOpenRouter(
+  result: AnalysisResult,
+  emit: Emit,
+  mode: "incident" | "summary",
+): Promise<void> {
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
     headers: {
@@ -114,7 +136,7 @@ async function streamFromOpenRouter(result: AnalysisResult, emit: Emit): Promise
       max_tokens: MAX_TOKENS,
       stream: true,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: mode === "summary" ? SUMMARY_SYSTEM_PROMPT : SYSTEM_PROMPT },
         { role: "user", content: buildUserMessage(result) },
       ],
     }),
@@ -167,7 +189,10 @@ async function streamFromOpenRouter(result: AnalysisResult, emit: Emit): Promise
  * Stream triage guidance as plain text chunks.
  * Falls back to the deterministic protocol on any failure.
  */
-export function streamTriage(result: AnalysisResult): ReadableStream<Uint8Array> {
+export function streamTriage(
+  result: AnalysisResult,
+  mode: "incident" | "summary" = "incident",
+): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
 
   return new ReadableStream({
@@ -185,7 +210,7 @@ export function streamTriage(result: AnalysisResult): ReadableStream<Uint8Array>
       }
 
       try {
-        await streamFromOpenRouter(result, emit);
+        await streamFromOpenRouter(result, emit, mode);
       } catch (error) {
         const reason =
           error instanceof DOMException && error.name === "TimeoutError"

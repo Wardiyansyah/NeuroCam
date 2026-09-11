@@ -13,20 +13,34 @@ import {
   type FaceBox,
 } from "@/lib/capture";
 import { STATUS_DISPLAY, formatBpm, formatPct } from "@/lib/status-display";
-import { ROI_NAMES, type AnalysisResult, type MonitorStatus, type RoiSample } from "@/lib/types";
+import {
+  ROI_NAMES,
+  type AnalysisResult,
+  type MonitorStatus,
+  type RoiSample,
+  type SignalQuality,
+} from "@/lib/types";
 
 const TARGET_FPS = 30;
 const FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
 /** How often reduced frames are shipped to the server. */
 const FLUSH_INTERVAL_MS = 1000;
-/** Face Mesh is the expensive call - run it a few times a second, not every frame. */
+/** Face detection is the expensive call - run it a few times a second, not every frame. */
 const DETECT_EVERY_N_FRAMES = 10;
+const QUALITY_TARGET_SECONDS = 1;
+const QUALITY_PROGRESS: Record<Extract<SignalQuality, "fair" | "good">, number> = {
+  fair: 1 / 20,
+  good: 1 / 10,
+};
+const EXTREME_SPIKE_PCT = 50;
 
 /** Threshold mirrors, used only to colour the bars. */
 const ASYM_WARN = 25;
 const ASYM_CRITICAL = 40;
 
 type Phase = "idle" | "starting" | "running" | "error";
+type Detector = FaceMeshTracker;
+
 export function MonitorClient() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -37,14 +51,17 @@ export function MonitorClient() {
   const rafRef = useRef<number | null>(null);
   const lastFrameRef = useRef<number>(0);
   const frameCountRef = useRef<number>(0);
-  const detectorRef = useRef<FaceMeshTracker | null>(null);
+  const detectorRef = useRef<Detector | null>(null);
+  const faceFoundRef = useRef(false);
   /** Guards against overlapping detect() calls when detection runs slow. */
   const detectingRef = useRef(false);
   const faceBoxRef = useRef<FaceBox>(GUIDE_BOX);
-  const faceFoundRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
   const flushingRef = useRef(false);
   const triagedIncidentRef = useRef<string | null>(null);
+  const qualityProgressRef = useRef(0);
+  const lastQualityAtRef = useRef<number | null>(null);
+  const autoStopRef = useRef(false);
 
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -53,10 +70,26 @@ export function MonitorClient() {
   const [detectorActive, setDetectorActive] = useState(false);
   const [triage, setTriage] = useState<string>("");
   const [triageLoading, setTriageLoading] = useState(false);
+  const [autoStopReason, setAutoStopReason] = useState<
+    "signal_quality" | "extreme_spike" | null
+  >(null);
 
   const status: MonitorStatus =
     phase === "running" ? (result?.status ?? "calibrating") : "idle";
   const display = STATUS_DISPLAY[status];
+
+  const autoStop = useCallback((reason: "signal_quality" | "extreme_spike") => {
+    if (autoStopRef.current) return;
+    autoStopRef.current = true;
+    if (rafRef.current !== null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    setPhase("idle");
+    setAutoStopReason(reason);
+  }, []);
 
   /** Ship the buffered samples and take the verdict back. */
   const flush = useCallback(async () => {
@@ -91,13 +124,40 @@ export function MonitorClient() {
       }
 
       if (!response.ok) return;
-      setResult((await response.json()) as AnalysisResult);
+      const nextResult = (await response.json()) as AnalysisResult;
+      setResult(nextResult);
+
+      const quality =
+        nextResult.hemodynamic.quality === "poor" || nextResult.asymmetry.quality === "poor"
+          ? null
+          : nextResult.hemodynamic.quality === "fair" ||
+              nextResult.asymmetry.quality === "fair"
+            ? "fair"
+            : "good";
+      const now = performance.now();
+      if (quality && lastQualityAtRef.current !== null) {
+        qualityProgressRef.current +=
+          ((now - lastQualityAtRef.current) / 1000) * QUALITY_PROGRESS[quality];
+      } else if (!quality) {
+        qualityProgressRef.current = 0;
+      }
+      lastQualityAtRef.current = quality ? now : null;
+
+      const extremeSpike =
+        nextResult.hemodynamic.spikePct !== null &&
+        Math.abs(nextResult.hemodynamic.spikePct) >= EXTREME_SPIKE_PCT;
+      if (
+        !autoStopRef.current &&
+        (qualityProgressRef.current >= QUALITY_TARGET_SECONDS || extremeSpike)
+      ) {
+        autoStop(extremeSpike ? "extreme_spike" : "signal_quality");
+      }
     } catch {
       // A dropped batch is recoverable - the next one carries fresh signal.
     } finally {
       flushingRef.current = false;
     }
-  }, []);
+  }, [autoStop]);
 
   /** Per-frame capture: draw, reduce to ROI means, discard the pixels. */
   const captureFrame = useCallback(async (now: number) => {
@@ -138,6 +198,7 @@ export function MonitorClient() {
           setFaceBox(box);
         }
       } catch {
+        faceFoundRef.current = false;
         // Detection is best-effort; the guide box stays valid.
       } finally {
         detectingRef.current = false;
@@ -160,11 +221,6 @@ export function MonitorClient() {
     }
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
-    if (detectorRef.current) {
-      void detectorRef.current.close();
-      detectorRef.current = null;
-    }
-    setDetectorActive(false);
 
     const sessionId = sessionIdRef.current;
     if (sessionId) {
@@ -176,6 +232,10 @@ export function MonitorClient() {
     setPhase("idle");
     setResult(null);
     setTriage("");
+    setAutoStopReason(null);
+    qualityProgressRef.current = 0;
+    lastQualityAtRef.current = null;
+    autoStopRef.current = false;
     triagedIncidentRef.current = null;
   }, []);
 
@@ -213,14 +273,18 @@ export function MonitorClient() {
 
       const detector = await createFaceMesh();
       detectorRef.current = detector;
-      setDetectorActive(true);
+      setDetectorActive(Boolean(detector));
 
       startTimeRef.current = performance.now();
       lastFrameRef.current = 0;
       frameCountRef.current = 0;
       bufferRef.current = [];
-      faceBoxRef.current = GUIDE_BOX;
       faceFoundRef.current = false;
+      qualityProgressRef.current = 0;
+      lastQualityAtRef.current = null;
+      autoStopRef.current = false;
+      setAutoStopReason(null);
+      faceBoxRef.current = GUIDE_BOX;
       setFaceBox(GUIDE_BOX);
 
       setPhase("running");
@@ -228,11 +292,6 @@ export function MonitorClient() {
     } catch (caught) {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
-      if (detectorRef.current) {
-        void detectorRef.current.close();
-        detectorRef.current = null;
-      }
-      setDetectorActive(false);
       setPhase("error");
       setError(
         caught instanceof DOMException && caught.name === "NotAllowedError"
@@ -256,20 +315,21 @@ export function MonitorClient() {
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       streamRef.current?.getTracks().forEach((track) => track.stop());
-      if (detectorRef.current) void detectorRef.current.close();
     };
   }, []);
 
-  // Stream the triage narrative once per critical incident.
+  // Stream the narrative once for an incident or an automatic quality stop.
   const incidentId = result?.incidentId;
   const resultStatus = result?.status;
   useEffect(() => {
     const sessionId = sessionIdRef.current;
-    if (!incidentId || !sessionId) return;
-    if (resultStatus !== "critical") return;
-    if (triagedIncidentRef.current === incidentId) return;
+    const shouldSummarize = autoStopReason !== null;
+    if (!sessionId || (!incidentId && !shouldSummarize)) return;
+    if (!shouldSummarize && resultStatus !== "critical") return;
+    const triageKey = incidentId ?? `${sessionId}:quality`;
+    if (triagedIncidentRef.current === triageKey) return;
 
-    triagedIncidentRef.current = incidentId;
+    triagedIncidentRef.current = triageKey;
     setTriage("");
     setTriageLoading(true);
 
@@ -280,7 +340,10 @@ export function MonitorClient() {
         const response = await fetch("/api/triage", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sessionId }),
+          body: JSON.stringify({
+            sessionId,
+            ...(shouldSummarize ? { reason: "automatic_stop" } : {}),
+          }),
           signal: controller.signal,
         });
         if (!response.ok || !response.body) return;
@@ -296,11 +359,15 @@ export function MonitorClient() {
         // The deterministic FAST panel is already on screen.
       } finally {
         setTriageLoading(false);
+        if (shouldSummarize) {
+          await fetch(`/api/session?id=${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+          sessionIdRef.current = null;
+        }
       }
     })();
 
     return () => controller.abort();
-  }, [incidentId, resultStatus]);
+  }, [autoStopReason, incidentId, resultStatus]);
 
   const hemo = result?.hemodynamic;
   const asym = result?.asymmetry;
@@ -396,8 +463,8 @@ export function MonitorClient() {
 
           <span className="text-xs text-muted">
             {detectorActive
-              ? "MediaPipe Face Mesh aktif di perangkat ini."
-              : "MediaPipe Face Mesh belum aktif — gunakan panduan oval."}
+              ? "Pelacakan wajah otomatis aktif."
+              : "Pelacakan otomatis tidak tersedia di peramban ini — gunakan panduan oval."}
           </span>
         </div>
 
@@ -522,13 +589,17 @@ export function MonitorClient() {
           </div>
         ) : null}
 
-        {status === "critical" || triage ? (
+        {status === "critical" || autoStopReason !== null || triage ? (
           <div className="rounded-xl border border-status-critical/40 bg-surface p-4">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-status-critical">
-              Asisten triase
+              {autoStopReason ? "Kesimpulan AI OpenRouter" : "Asisten triase"}
             </h2>
             {triageLoading && !triage ? (
-              <p className="mt-2 text-sm text-muted">Menyusun panduan…</p>
+              <p className="mt-2 text-sm text-muted">
+                {autoStopReason
+                  ? "Menganalisis metrik rata-rata sesi…"
+                  : "Menyusun panduan…"}
+              </p>
             ) : null}
             {triage ? (
               <pre className="mt-2 whitespace-pre-wrap font-sans text-sm leading-snug text-foreground/90">

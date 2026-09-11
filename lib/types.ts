@@ -97,8 +97,20 @@ export interface AnalysisResult {
   windowSeconds: number;
   /** True once a baseline heart rate has been established. */
   calibrated: boolean;
+  /** Running averages used when the monitoring session is auto-completed. */
+  averages: MetricAverages;
   /** Set when this cycle escalated to critical and an incident was recorded. */
   incidentId?: string;
+}
+
+export interface MetricAverages {
+  samples: number;
+  bpm: number | null;
+  asymmetryOverall: number;
+  asymmetryMouth: number;
+  asymmetryEye: number;
+  asymmetryBrow: number;
+  snrDb: number;
 }
 
 /**

@@ -20,6 +20,15 @@ const RESULT: AnalysisResult = {
   triggered: [{ code: "HR_SPIKE", label: "Fluktuasi detak jantung", detail: "125 bpm, +73.6%" }],
   windowSeconds: 5,
   calibrated: true,
+  averages: {
+    samples: 3,
+    bpm: 110,
+    asymmetryOverall: 42,
+    asymmetryMouth: 44,
+    asymmetryEye: 39,
+    asymmetryBrow: 37,
+    snrDb: 10.2,
+  },
   incidentId: "inc-1",
 };
 

@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     return Response.json({ error: "body JSON tidak valid" }, { status: 400 });
   }
 
-  const { sessionId } = (body ?? {}) as Record<string, unknown>;
+  const { sessionId, reason } = (body ?? {}) as Record<string, unknown>;
   if (typeof sessionId !== "string" || sessionId.length === 0) {
     return Response.json({ error: "sessionId wajib diisi" }, { status: 400 });
   }
@@ -31,14 +31,15 @@ export async function POST(request: Request) {
   }
 
   const result = state.lastResult;
-  if (result.status !== "critical" && result.status !== "warning") {
+  const isSummary = reason === "automatic_stop" || reason === "signal_quality";
+  if (!isSummary && result.status !== "critical" && result.status !== "warning") {
     return Response.json(
       { error: "triase hanya tersedia untuk status warning atau critical" },
       { status: 409 },
     );
   }
 
-  const [clientStream, storeStream] = streamTriage(result).tee();
+  const [clientStream, storeStream] = streamTriage(result, isSummary ? "summary" : "incident").tee();
 
   // Attach the finished narrative to the incident record without making the
   // patient's stream wait on the write.

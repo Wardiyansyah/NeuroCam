@@ -26,6 +26,8 @@ export interface Thresholds {
   windowSeconds: number;
   /** Percent deviation from personal baseline HR that counts as a spike. */
   hrSpikePct: number;
+  /** Extreme deviation that escalates immediately, even with good signal. */
+  hrCriticalSpikePct: number;
   /** Absolute heart-rate bounds, outside which we flag regardless of baseline. */
   hrAbsoluteMin: number;
   hrAbsoluteMax: number;
@@ -50,6 +52,7 @@ function numberFromEnv(name: string, fallback: number): number {
 export const THRESHOLDS: Thresholds = {
   windowSeconds: numberFromEnv("STROKE_WINDOW_SECONDS", 5),
   hrSpikePct: numberFromEnv("STROKE_HR_SPIKE_PCT", 30),
+  hrCriticalSpikePct: numberFromEnv("STROKE_HR_CRITICAL_SPIKE_PCT", 50),
   hrAbsoluteMin: numberFromEnv("STROKE_HR_MIN", 40),
   hrAbsoluteMax: numberFromEnv("STROKE_HR_MAX", 130),
   asymmetryWarn: numberFromEnv("STROKE_ASYMMETRY_WARN", 25),
@@ -159,6 +162,20 @@ export function evaluate(
           `${hemodynamic.spikePct > 0 ? "+" : ""}${hemodynamic.spikePct}% dari ` +
           `baseline ${hemodynamic.baselineBpm} bpm (ambang ±${thresholds.hrSpikePct}%).`,
       });
+    }
+
+    if (
+      hemodynamic.spikePct !== null &&
+      Math.abs(hemodynamic.spikePct) >= thresholds.hrCriticalSpikePct
+    ) {
+      triggered.push({
+        code: "HR_SPIKE_EXTREME",
+        label: "Lonjakan metrik luar biasa",
+        detail:
+          `Deviasi detak jantung ${hemodynamic.spikePct > 0 ? "+" : ""}${hemodynamic.spikePct}% ` +
+          `melewati ambang kritis ±${thresholds.hrCriticalSpikePct}%.`,
+      });
+      return { status: "critical", triggered };
     }
 
     if (

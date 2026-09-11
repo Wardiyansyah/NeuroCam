@@ -141,12 +141,12 @@ export interface FaceMeshTracker {
  * fetched by the browser, and only normalized landmarks remain in memory.
  */
 export async function createFaceMesh(): Promise<FaceMeshTracker> {
-  const module = (await import("@mediapipe/face_mesh")) as unknown as {
+  const faceMeshModule = (await import("@mediapipe/face_mesh")) as unknown as {
     FaceMesh: new (config: {
       locateFile: (file: string) => string;
     }) => FaceMeshType;
   };
-  const mesh = new module.FaceMesh({
+  const mesh = new faceMeshModule.FaceMesh({
     locateFile: (file) =>
       `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`,
   });

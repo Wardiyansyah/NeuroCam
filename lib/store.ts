@@ -15,7 +15,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { AsymmetryScores } from "@/lib/signal/asymmetry";
-import type { AnalysisResult, Incident, RoiSample, SessionMeta } from "@/lib/types";
+import type { AnalysisResult, Incident, MetricAverages, RoiSample, SessionMeta } from "@/lib/types";
 import { getPostgresPool } from "@/lib/postgres";
 
 /** How much history each session retains. */
@@ -53,6 +53,16 @@ export interface SessionState {
   /** Most recent verdict, so the triage route can work from server state
    *  instead of trusting metrics posted back by the client. */
   lastResult?: AnalysisResult;
+  metricAggregate?: {
+    count: number;
+    bpmSum: number;
+    bpmCount: number;
+    asymmetryOverallSum: number;
+    asymmetryMouthSum: number;
+    asymmetryEyeSum: number;
+    asymmetryBrowSum: number;
+    snrDbSum: number;
+  };
 }
 
 export interface SessionStore {
@@ -147,7 +157,9 @@ export const sessionStore: SessionStore = {
       calibrationBpm: [],
       calibrationAsymmetry: [],
       calibrated: false,
+      metricAggregate: undefined,
     };
+
     sessions.set(state.meta.id, state);
     return state;
   },
@@ -167,16 +179,79 @@ export const sessionStore: SessionStore = {
   },
 };
 
+export function metricAverages(state: SessionState): MetricAverages {
+  const aggregate = state.metricAggregate;
+  if (!aggregate || aggregate.count === 0) {
+    return {
+      samples: 0,
+      bpm: null,
+      asymmetryOverall: 0,
+      asymmetryMouth: 0,
+      asymmetryEye: 0,
+      asymmetryBrow: 0,
+      snrDb: 0,
+    };
+  }
+
+  return {
+    samples: aggregate.count,
+    bpm:
+      aggregate.bpmCount > 0
+        ? Number((aggregate.bpmSum / aggregate.bpmCount).toFixed(1))
+        : null,
+    asymmetryOverall: Number((aggregate.asymmetryOverallSum / aggregate.count).toFixed(1)),
+    asymmetryMouth: Number((aggregate.asymmetryMouthSum / aggregate.count).toFixed(1)),
+    asymmetryEye: Number((aggregate.asymmetryEyeSum / aggregate.count).toFixed(1)),
+    asymmetryBrow: Number((aggregate.asymmetryBrowSum / aggregate.count).toFixed(1)),
+    snrDb: Number((aggregate.snrDbSum / aggregate.count).toFixed(2)),
+  };
+}
+
 export const incidentStore: IncidentStore = {
   async append(incident: Incident) {
     incidents.unshift(incident);
     // Keep the demo store bounded; a real backend would page instead.
     if (incidents.length > 200) incidents.length = 200;
+
+    const pool = getPostgresPool();
+    if (pool) {
+      await pool.query(
+        `INSERT INTO public.face_scan_metrics (
+           session_id, heart_rate_bpm, asymmetry_index, au12_mouth,
+           au6_7_eye, au4_eyebrow, scan_status, scan_notes, triggered_rules
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [
+          incident.sessionId,
+          incident.metrics.bpm,
+          incident.metrics.asymmetryOverall,
+          incident.metrics.asymmetryMouth,
+          incident.metrics.asymmetryEye,
+          incident.metrics.asymmetryBrow,
+          incident.status,
+          null,
+          JSON.stringify(incident.triggered),
+        ],
+      );
+    }
   },
 
   async update(id: string, patch: Partial<Incident>) {
     const found = incidents.find((i) => i.id === id);
     if (found) Object.assign(found, patch);
+
+    if (patch.triage) {
+      const pool = getPostgresPool();
+      if (pool) {
+        await pool.query(
+          `UPDATE public.face_scan_metrics
+           SET scan_notes = $1
+           WHERE session_id = $2
+             AND created_at = $3`,
+          [patch.triage, found?.sessionId, found?.at],
+        );
+      }
+    }
   },
 
   async list(limit = 50) {

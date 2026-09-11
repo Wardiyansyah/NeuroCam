@@ -147,7 +147,7 @@ console.log("\n5. Threshold evaluation");
 
   check("baseline case is normal", evaluate(base).status === "normal", evaluate(base).status);
 
-  const hrOnly = { ...base, hemodynamic: { ...base.hemodynamic, bpm: 110, spikePct: 52.8 } };
+  const hrOnly = { ...base, hemodynamic: { ...base.hemodynamic, bpm: 100, spikePct: 38.9 } };
   check("HR spike alone is warning", evaluate(hrOnly).status === "warning", evaluate(hrOnly).status);
 
   const asymOnly = { ...base, asymmetry: { ...base.asymmetry, overall: 30, mouth: 30 } };

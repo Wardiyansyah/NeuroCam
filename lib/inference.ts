@@ -18,6 +18,7 @@ import {
   appendSamples,
   bufferedSeconds,
   incidentStore,
+  metricAverages,
   windowOf,
   type SessionState,
 } from "@/lib/store";
@@ -113,7 +114,30 @@ export async function analyzeSession(
     triggered,
     windowSeconds: Number(windowSeconds.toFixed(1)),
     calibrated: state.calibrated,
+    averages: metricAverages(state),
   };
+
+  const aggregate = (state.metricAggregate ??= {
+    count: 0,
+    bpmSum: 0,
+    bpmCount: 0,
+    asymmetryOverallSum: 0,
+    asymmetryMouthSum: 0,
+    asymmetryEyeSum: 0,
+    asymmetryBrowSum: 0,
+    snrDbSum: 0,
+  });
+  aggregate.count += 1;
+  if (hemodynamic.bpm !== null) {
+    aggregate.bpmSum += hemodynamic.bpm;
+    aggregate.bpmCount += 1;
+  }
+  aggregate.asymmetryOverallSum += asymmetry.overall;
+  aggregate.asymmetryMouthSum += asymmetry.mouth;
+  aggregate.asymmetryEyeSum += asymmetry.eye;
+  aggregate.asymmetryBrowSum += asymmetry.brow;
+  aggregate.snrDbSum += hemodynamic.snrDb;
+  result.averages = metricAverages(state);
 
   if (status === "critical" || status === "warning") {
     result.incidentId = await recordIncident(result);
