@@ -16,6 +16,7 @@ const POLL_INTERVAL_MS = 5000;
 
 export function IncidentTable() {
   const [incidents, setIncidents] = useState<Incident[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
@@ -24,11 +25,17 @@ export function IncidentTable() {
     const load = async () => {
       try {
         const response = await fetch("/api/incidents", { cache: "no-store" });
-        if (!response.ok) return;
+        if (!response.ok) {
+          if (!cancelled) setError("Riwayat insiden tidak dapat dibaca dari database.");
+          return;
+        }
         const data = await response.json();
-        if (!cancelled) setIncidents(data.incidents as Incident[]);
+        if (!cancelled) {
+          setError(null);
+          setIncidents(data.incidents as Incident[]);
+        }
       } catch {
-        // Transient failure - the next poll retries.
+        if (!cancelled) setError("Riwayat insiden tidak dapat dibaca dari database.");
       }
     };
 
@@ -39,6 +46,15 @@ export function IncidentTable() {
       clearInterval(timer);
     };
   }, []);
+
+  if (error !== null) {
+    return (
+      <div className="rounded-xl border border-dashed border-border-subtle p-10 text-center">
+        <p className="text-sm font-medium">{error}</p>
+        <p className="mt-1.5 text-sm text-muted">Percobaan berikutnya akan berjalan otomatis.</p>
+      </div>
+    );
+  }
 
   if (incidents === null) {
     return <p className="text-sm text-muted">Memuat riwayat insiden…</p>;

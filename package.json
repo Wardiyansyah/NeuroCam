@@ -10,6 +10,7 @@
     "verify": "npx --yes tsx scripts/verify-signals.ts && npx --yes tsx scripts/verify-triage.mts"
   },
   "dependencies": {
+    "@mediapipe/face_mesh": "^0.4.1633559619",
     "next": "16.3.4",
     "pg": "^8.23.0",
     "react": "19.2.8",

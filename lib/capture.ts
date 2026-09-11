@@ -15,6 +15,7 @@
  */
 
 import { ROI_NAMES, type Rgb, type RoiName, type RoiSample } from "@/lib/types";
+import type { FaceMesh as FaceMeshType, NormalizedLandmark, Results } from "@mediapipe/face_mesh";
 
 /** Working canvas width. Small on purpose - rPPG wants averaged area, not detail. */
 export const CAPTURE_WIDTH = 320;
@@ -108,6 +109,7 @@ export interface FrameSample {
 export function sampleFrame(
   image: ImageData,
   box: FaceBox,
+  faceFound: boolean,
 ): FrameSample {
   const { width, height, data } = image;
   const bx = box.x * width;
@@ -126,58 +128,79 @@ export function sampleFrame(
     });
   }
 
-  // Require skin at the two highest-perfusion sites plus one cheek. Demanding
-  // all nine would flag on a blink or a hand near the mouth.
-  const skinVotes = [roi.forehead, roi.cheekL, roi.cheekR].filter(looksLikeSkin).length;
-
-  return { roi, faceFound: skinVotes >= 2 };
+  return { roi, faceFound };
 }
 
-/** Minimal shape of the Shape Detection API, which TS does not ship types for. */
-interface DetectedFace {
-  boundingBox: { x: number; y: number; width: number; height: number };
-}
-interface FaceDetectorLike {
-  detect(source: CanvasImageSource): Promise<DetectedFace[]>;
+export interface FaceMeshTracker {
+  detect(source: HTMLCanvasElement): Promise<FaceBox | null>;
+  close(): Promise<void>;
 }
 
 /**
- * Create a face tracker if the browser exposes the Shape Detection API,
- * otherwise null - callers then fall back to `GUIDE_BOX` and the on-screen
- * alignment oval.
+ * Create the browser-local MediaPipe Face Mesh tracker. Model assets are
+ * fetched by the browser, and only normalized landmarks remain in memory.
  */
-export function createFaceDetector(): FaceDetectorLike | null {
-  const ctor = (
-    globalThis as unknown as {
-      FaceDetector?: new (options?: { fastMode?: boolean; maxDetectedFaces?: number }) => FaceDetectorLike;
-    }
-  ).FaceDetector;
+export async function createFaceMesh(): Promise<FaceMeshTracker> {
+  const module = (await import("@mediapipe/face_mesh")) as unknown as {
+    FaceMesh: new (config: {
+      locateFile: (file: string) => string;
+    }) => FaceMeshType;
+  };
+  const mesh = new module.FaceMesh({
+    locateFile: (file) =>
+      `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`,
+  });
+  mesh.setOptions({
+    maxNumFaces: 1,
+    refineLandmarks: false,
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.6,
+  });
 
-  if (!ctor) return null;
-  try {
-    return new ctor({ fastMode: true, maxDetectedFaces: 1 });
-  } catch {
-    return null;
-  }
-}
-
-/** Convert a detector result in pixels to a normalised face box, padded a little. */
-export function toFaceBox(
-  face: DetectedFace,
-  frameWidth: number,
-  frameHeight: number,
-): FaceBox {
-  const pad = 0.08;
-  const w = (face.boundingBox.width / frameWidth) * (1 + pad * 2);
-  const h = (face.boundingBox.height / frameHeight) * (1 + pad * 2);
-  const x = face.boundingBox.x / frameWidth - (w * pad) / (1 + pad * 2);
-  const y = face.boundingBox.y / frameHeight - (h * pad) / (1 + pad * 2);
+  let pending: { resolve: (box: FaceBox | null) => void; reject: (error: unknown) => void } | null =
+    null;
+  mesh.onResults((results: Results) => {
+    const request = pending;
+    pending = null;
+    request?.resolve(results.multiFaceLandmarks[0] ? landmarksToFaceBox(results.multiFaceLandmarks[0]) : null);
+  });
 
   return {
-    x: Math.max(0, Math.min(1, x)),
-    y: Math.max(0, Math.min(1, y)),
-    w: Math.max(0.05, Math.min(1, w)),
-    h: Math.max(0.05, Math.min(1, h)),
+    detect(source: HTMLCanvasElement) {
+      if (pending) return Promise.reject(new Error("Face Mesh masih memproses frame sebelumnya."));
+      return new Promise<FaceBox | null>((resolve, reject) => {
+        pending = { resolve, reject };
+        void mesh.send({ image: source }).catch((error: unknown) => {
+          if (pending) {
+            pending = null;
+            reject(error);
+          }
+        });
+      });
+    },
+    close() {
+      return mesh.close();
+    },
+  };
+}
+
+/** Convert normalized Face Mesh landmarks to a padded sampling box. */
+function landmarksToFaceBox(landmarks: NormalizedLandmark[]): FaceBox {
+  const pad = 0.08;
+  const xs = landmarks.map((landmark) => landmark.x);
+  const ys = landmarks.map((landmark) => landmark.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const width = maxX - minX;
+  const height = maxY - minY;
+
+  return {
+    x: Math.max(0, minX - width * pad),
+    y: Math.max(0, minY - height * pad),
+    w: Math.min(1, width * (1 + pad * 2)),
+    h: Math.min(1, height * (1 + pad * 2)),
   };
 }
 

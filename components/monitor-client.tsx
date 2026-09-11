@@ -6,10 +6,10 @@ import {
   CAPTURE_WIDTH,
   GUIDE_BOX,
   ROI_LAYOUT,
-  createFaceDetector,
+  createFaceMesh,
   sampleFrame,
-  toFaceBox,
   toRoiSample,
+  type FaceMeshTracker,
   type FaceBox,
 } from "@/lib/capture";
 import { STATUS_DISPLAY, formatBpm, formatPct } from "@/lib/status-display";
@@ -19,7 +19,7 @@ const TARGET_FPS = 30;
 const FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
 /** How often reduced frames are shipped to the server. */
 const FLUSH_INTERVAL_MS = 1000;
-/** Face detection is the expensive call - run it a few times a second, not every frame. */
+/** Face Mesh is the expensive call - run it a few times a second, not every frame. */
 const DETECT_EVERY_N_FRAMES = 10;
 
 /** Threshold mirrors, used only to colour the bars. */
@@ -27,8 +27,6 @@ const ASYM_WARN = 25;
 const ASYM_CRITICAL = 40;
 
 type Phase = "idle" | "starting" | "running" | "error";
-type Detector = NonNullable<ReturnType<typeof createFaceDetector>>;
-
 export function MonitorClient() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -39,10 +37,11 @@ export function MonitorClient() {
   const rafRef = useRef<number | null>(null);
   const lastFrameRef = useRef<number>(0);
   const frameCountRef = useRef<number>(0);
-  const detectorRef = useRef<Detector | null>(null);
+  const detectorRef = useRef<FaceMeshTracker | null>(null);
   /** Guards against overlapping detect() calls when detection runs slow. */
   const detectingRef = useRef(false);
   const faceBoxRef = useRef<FaceBox>(GUIDE_BOX);
+  const faceFoundRef = useRef(false);
   const streamRef = useRef<MediaStream | null>(null);
   const flushingRef = useRef(false);
   const triagedIncidentRef = useRef<string | null>(null);
@@ -119,7 +118,7 @@ export function MonitorClient() {
     // later frame redraw the canvas underneath us, pairing this sample's
     // timestamp with a different frame's pixels.
     const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const sample = sampleFrame(image, faceBoxRef.current);
+    const sample = sampleFrame(image, faceBoxRef.current, faceFoundRef.current);
     bufferRef.current.push(toRoiSample(sample, now - startTimeRef.current));
 
     // Detection is refreshed out of band and applies to subsequent frames.
@@ -132,9 +131,9 @@ export function MonitorClient() {
     if (shouldDetect) {
       detectingRef.current = true;
       try {
-        const faces = await detectorRef.current!.detect(canvas);
-        if (faces.length > 0) {
-          const box = toFaceBox(faces[0], canvas.width, canvas.height);
+        const box = await detectorRef.current!.detect(canvas);
+        faceFoundRef.current = box !== null;
+        if (box) {
           faceBoxRef.current = box;
           setFaceBox(box);
         }
@@ -161,6 +160,11 @@ export function MonitorClient() {
     }
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+    if (detectorRef.current) {
+      void detectorRef.current.close();
+      detectorRef.current = null;
+    }
+    setDetectorActive(false);
 
     const sessionId = sessionIdRef.current;
     if (sessionId) {
@@ -207,15 +211,16 @@ export function MonitorClient() {
       const data = await response.json();
       sessionIdRef.current = data.sessionId;
 
-      const detector = createFaceDetector();
+      const detector = await createFaceMesh();
       detectorRef.current = detector;
-      setDetectorActive(Boolean(detector));
+      setDetectorActive(true);
 
       startTimeRef.current = performance.now();
       lastFrameRef.current = 0;
       frameCountRef.current = 0;
       bufferRef.current = [];
       faceBoxRef.current = GUIDE_BOX;
+      faceFoundRef.current = false;
       setFaceBox(GUIDE_BOX);
 
       setPhase("running");
@@ -223,6 +228,11 @@ export function MonitorClient() {
     } catch (caught) {
       streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
+      if (detectorRef.current) {
+        void detectorRef.current.close();
+        detectorRef.current = null;
+      }
+      setDetectorActive(false);
       setPhase("error");
       setError(
         caught instanceof DOMException && caught.name === "NotAllowedError"
@@ -246,6 +256,7 @@ export function MonitorClient() {
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
       streamRef.current?.getTracks().forEach((track) => track.stop());
+      if (detectorRef.current) void detectorRef.current.close();
     };
   }, []);
 
@@ -385,8 +396,8 @@ export function MonitorClient() {
 
           <span className="text-xs text-muted">
             {detectorActive
-              ? "Pelacakan wajah otomatis aktif."
-              : "Pelacakan otomatis tidak tersedia di peramban ini — gunakan panduan oval."}
+              ? "MediaPipe Face Mesh aktif di perangkat ini."
+              : "MediaPipe Face Mesh belum aktif — gunakan panduan oval."}
           </span>
         </div>
 

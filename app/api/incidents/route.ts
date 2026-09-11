@@ -15,9 +15,17 @@ export async function GET(request: Request) {
   const raw = new URL(request.url).searchParams.get("limit");
   const parsed = Number(raw);
   const limit = Number.isFinite(parsed)
-    ? Math.min(MAX_LIMIT, Math.max(1, parsed))
+    ? Math.min(MAX_LIMIT, Math.max(1, Math.floor(parsed)))
     : DEFAULT_LIMIT;
 
-  const incidents = await incidentStore.list(limit);
-  return Response.json({ incidents, count: incidents.length });
+  try {
+    const incidents = await incidentStore.list(limit);
+    return Response.json({ incidents, count: incidents.length });
+  } catch (error) {
+    console.error("Gagal membaca insiden dari PostgreSQL:", error);
+    return Response.json(
+      { error: "Gagal membaca riwayat insiden dari database." },
+      { status: 503 },
+    );
+  }
 }

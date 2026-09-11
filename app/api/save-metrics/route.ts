@@ -63,8 +63,11 @@ export async function POST(req: Request) {
       data: result.rows[0] // Mengembalikan baris yang baru saja di-insert
     });
 
-  } catch (error: any) {
-    console.error("Database Error:", error.message);
+  } catch (error: unknown) {
+    console.error(
+      "Database Error:",
+      error instanceof Error ? error.message : "Unknown database error",
+    );
     return NextResponse.json(
       { success: false, error: 'Gagal menyimpan metrik ke database.' }, 
       { status: 500 }

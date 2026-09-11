@@ -16,6 +16,7 @@
 import { randomUUID } from "node:crypto";
 import type { AsymmetryScores } from "@/lib/signal/asymmetry";
 import type { AnalysisResult, Incident, RoiSample, SessionMeta } from "@/lib/types";
+import { getPostgresPool } from "@/lib/postgres";
 
 /** How much history each session retains. */
 export const BUFFER_SECONDS = 12;
@@ -79,6 +80,54 @@ const globalState = globalThis as unknown as {
 const sessions = (globalState.__strokeSessions ??= new Map<string, SessionState>());
 const incidents = (globalState.__strokeIncidents ??= []);
 
+function asNumber(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function asStatus(value: unknown): Incident["status"] | null {
+  if (typeof value !== "string") return null;
+  const status = value.toLowerCase();
+  return status === "warning" || status === "critical" ? status : null;
+}
+
+function parseTriggered(value: unknown): Incident["triggered"] {
+  if (Array.isArray(value)) return value as Incident["triggered"];
+  if (typeof value !== "string") return [];
+
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? (parsed as Incident["triggered"]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function mapDatabaseIncident(row: Record<string, unknown>): Incident | null {
+  const status = asStatus(row.scan_status);
+  if (!status) return null;
+
+  return {
+    id: String(row.id ?? `${row.session_id ?? "incident"}-${row.created_at ?? row.at}`),
+    sessionId: String(row.session_id ?? ""),
+    at: String(row.created_at ?? row.at ?? new Date().toISOString()),
+    status,
+    metrics: {
+      bpm: asNumber(row.heart_rate_bpm),
+      baselineBpm: null,
+      hrSpikePct: null,
+      asymmetryOverall: asNumber(row.asymmetry_index) ?? 0,
+      asymmetryMouth: asNumber(row.au12_mouth) ?? 0,
+      asymmetryEye: asNumber(row.au6_7_eye) ?? 0,
+      asymmetryBrow: asNumber(row.au4_eyebrow) ?? 0,
+      snrDb: 0,
+    },
+    triggered: parseTriggered(row.triggered_rules),
+    triage: typeof row.scan_notes === "string" ? row.scan_notes : undefined,
+  };
+}
+
 function pruneExpired(): void {
   const cutoff = Date.now() - SESSION_TTL_MS;
   for (const [id, state] of sessions) {
@@ -131,6 +180,22 @@ export const incidentStore: IncidentStore = {
   },
 
   async list(limit = 50) {
+    const pool = getPostgresPool();
+    if (pool) {
+      const result = await pool.query<Record<string, unknown>>(
+        `SELECT *
+         FROM public.face_scan_metrics
+         WHERE LOWER(scan_status) IN ('warning', 'critical')
+         ORDER BY created_at DESC
+         LIMIT $1`,
+        [limit],
+      );
+
+      return result.rows
+        .map(mapDatabaseIncident)
+        .filter((incident): incident is Incident => incident !== null);
+    }
+
     return incidents.slice(0, limit);
   },
 };

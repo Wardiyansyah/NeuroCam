@@ -22,8 +22,10 @@ npm run verify       # verifikasi pipeline sinyal terhadap data sintetis
 
 Kamera memerlukan origin aman: `localhost` sudah aman, host lain butuh HTTPS.
 
-Salin `.env.example` ke `.env.local` bila ingin mengaktifkan asisten triase atau
-inference server. **Aplikasi berjalan penuh tanpa satu pun variabel diisi.**
+Salin `.env.example` ke `.env.local` bila ingin mengaktifkan asisten triase.
+Pelacakan wajah memakai MediaPipe Face Mesh di browser, sedangkan metrik tetap
+dihitung oleh pipeline sinyal yang sudah ada. **Aplikasi berjalan penuh tanpa
+satu pun variabel diisi.**
 
 ---
 
@@ -64,8 +66,9 @@ video mentah yang bisa bocor, ter-buffer di proxy, atau lupa dihapus, karena
 tidak pernah ada video yang dikirim. Konsekuensinya, model AU penuh berbasis
 landmark tidak bisa dijalankan dari data ini — lihat penyimpangan 3.
 
-Jalur WebRTC → GPU tetap tersedia: isi `INFERENCE_SERVER_URL` dan ekstraksi
-metrik didelegasikan ke layanan eksternal (kontrak di `lib/inference.ts`).
+Pelacakan wajah memakai MediaPipe Face Mesh secara lokal di browser. Server
+hanya menerima rata-rata warna per ROI dan tetap menghitung metrik rPPG serta
+asimetri dengan pipeline yang sama.
 
 ### 2. Nama model diperbarui
 
@@ -147,33 +150,19 @@ memisahkan 70 dari 76 bpm:
 | Retensi      | 12 s   | Buffer sesi                           |
 | Kalibrasi    | 20 s   | Baseline HR dan asimetri pribadi      |
 
-### Jalur RunPod (opsional)
+### MediaPipe Face Mesh (lokal)
 
-Ekstraksi metrik dapat didelegasikan ke peladen GPU sesuai draft. Isi
-`INFERENCE_SERVER_URL`, dan `lib/inference.ts` akan memanggil:
+Face Mesh memproses frame kamera di browser dan menghasilkan landmark hanya
+untuk menentukan bounding box serta status keberadaan wajah. Frame mentah tidak
+dikirim ke server.
 
-```
-POST {INFERENCE_SERVER_URL}/extract
+MediaPipe menghasilkan landmark secara lokal dan tidak mengirim frame mentah.
 Authorization: Bearer {INFERENCE_SERVER_TOKEN}
 
-  → { "fps": 30, "samples": [ { "t": 0, "faceFound": true,
-                                "roi": { "forehead": [r,g,b], ... } }, ... ] }
 
-  ← { "bpm": 72 | null,
-      "snrDb": 11.6,
-      "quality": "good" | "fair" | "poor",
-      "asymmetry": { "mouth": 0, "eye": 0, "brow": 0, "overall": 0 } }
-```
+Reduksi ROI, metrik CHROM rPPG, asimetri fotometrik, baseline, dan threshold
+tetap menggunakan pipeline yang sama.
 
-Peladen Python-nya **belum disertakan** di repositori ini — yang ada adalah sisi
-kliennya: kontrak, autentikasi bearer, timeout 2 detik, dan *fallback* otomatis
-ke ekstraksi CHROM lokal bila peladen lambat, gagal, atau sedang *cold start*.
-Sesi pemantauan tidak boleh buta hanya karena worker GPU baru bangun.
-
-Perhatikan bahwa yang dikirim ke peladen tetap sampel ROI tereduksi, bukan
-video. Untuk menjalankan model AU berbasis landmark seperti pada draft, jalur
-transport perlu diubah agar mengirim bingkai — dan itu mengembalikan
-kompromi privasi yang dijelaskan pada penyimpangan 1.
 
 ### Gerbang sinyal mendahului semua aturan
 

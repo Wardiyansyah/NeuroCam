@@ -1,18 +1,9 @@
 /**
  * Analysis orchestration - step 3 and 4 of the pipeline.
  *
- * Two execution modes:
- *
- *  1. LOCAL (default). The CHROM rPPG and photometric asymmetry stages in
- *     `lib/signal/` run in the Node process. No GPU, no external service, and
- *     no raw video ever leaves the browser - the client sends reduced per-ROI
- *     colour means only.
- *
- *  2. REMOTE. Set `INFERENCE_SERVER_URL` and metric extraction is delegated to
- *     the FastAPI + PyTorch service described in the draft (RunPod serverless
- *     GPU). The request/response contract is defined below. Thresholding,
- *     baselines and incident recording stay here either way, so the crisis
- *     logic has exactly one implementation.
+ * Face tracking runs locally in the browser with MediaPipe Face Mesh. The
+ * existing CHROM rPPG and photometric asymmetry metrics remain server-side;
+ * no inference service or raw video is required.
  */
 
 import { randomUUID } from "node:crypto";
@@ -32,49 +23,6 @@ import {
 } from "@/lib/store";
 import { evaluate } from "@/lib/thresholds";
 import type { AnalysisResult, HemodynamicMetrics, Incident, RoiSample } from "@/lib/types";
-
-const INFERENCE_SERVER_URL = process.env.INFERENCE_SERVER_URL;
-const INFERENCE_SERVER_TOKEN = process.env.INFERENCE_SERVER_TOKEN;
-const INFERENCE_TIMEOUT_MS = 2000;
-
-/** Shape the GPU inference server must return from `POST /extract`. */
-interface RemoteMetrics {
-  bpm: number | null;
-  snrDb: number;
-  quality: "good" | "fair" | "poor";
-  asymmetry: { mouth: number; eye: number; brow: number; overall: number };
-}
-
-/**
- * Call the remote inference server. Returns null on any failure so the caller
- * can fall back to local extraction - a monitoring session must not go blind
- * because a GPU worker cold-started.
- */
-async function extractRemote(
-  samples: RoiSample[],
-  fps: number,
-): Promise<RemoteMetrics | null> {
-  if (!INFERENCE_SERVER_URL) return null;
-
-  try {
-    const response = await fetch(`${INFERENCE_SERVER_URL.replace(/\/$/, "")}/extract`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(INFERENCE_SERVER_TOKEN
-          ? { authorization: `Bearer ${INFERENCE_SERVER_TOKEN}` }
-          : {}),
-      },
-      body: JSON.stringify({ fps, samples }),
-      signal: AbortSignal.timeout(INFERENCE_TIMEOUT_MS),
-    });
-
-    if (!response.ok) return null;
-    return (await response.json()) as RemoteMetrics;
-  } catch {
-    return null;
-  }
-}
 
 /** Median-ish central value that ignores the tails of a noisy calibration run. */
 function robustMean(values: number[]): number | null {
@@ -97,10 +45,7 @@ function averageAsymmetry(runs: AsymmetryScores[]): AsymmetryScores | null {
   };
 }
 
-/**
- * Ingest a batch of frames and produce the current verdict.
- * Mutates `state` - the caller is responsible for persisting it.
- */
+/** Ingest a batch of frames and produce the current verdict. */
 export async function analyzeSession(
   state: SessionState,
   incoming: RoiSample[],
@@ -109,28 +54,10 @@ export async function analyzeSession(
 
   const pulseWindow = windowOf(state, PULSE_WINDOW_SECONDS);
   const crisisWindow = windowOf(state, CRISIS_WINDOW_SECONDS);
+  const pulse = estimatePulse(pulseWindow, state.meta.fps);
+  const hemodynamicRaw = toHemodynamicMetrics(pulse, null);
+  const asymmetryRaw = computeAsymmetry(crisisWindow);
 
-  const remote = await extractRemote(pulseWindow, state.meta.fps);
-
-  let hemodynamicRaw: HemodynamicMetrics;
-  let asymmetryRaw: AsymmetryScores;
-
-  if (remote) {
-    hemodynamicRaw = {
-      bpm: remote.bpm,
-      snrDb: remote.snrDb,
-      quality: remote.quality,
-      baselineBpm: null,
-      spikePct: null,
-    };
-    asymmetryRaw = { ...remote.asymmetry, quality: remote.quality };
-  } else {
-    const pulse = estimatePulse(pulseWindow, state.meta.fps);
-    hemodynamicRaw = toHemodynamicMetrics(pulse, null);
-    asymmetryRaw = computeAsymmetry(crisisWindow);
-  }
-
-  // --- Calibration ---------------------------------------------------------
   const elapsedSeconds =
     state.samples.length === 0 ? 0 : state.samples[state.samples.length - 1].t / 1000;
 
@@ -161,13 +88,11 @@ export async function analyzeSession(
   };
 
   const asymmetry = applyBaseline(asymmetryRaw, state.baselineAsymmetry);
-
-  // Face presence is judged on the most recent frames only - see FACE_GATE_SECONDS.
   const gateWindow = windowOf(state, FACE_GATE_SECONDS);
   const faceTrackingRatio =
     gateWindow.length === 0
       ? 0
-      : gateWindow.filter((s) => s.faceFound).length / gateWindow.length;
+      : gateWindow.filter((sample) => sample.faceFound).length / gateWindow.length;
 
   const windowSeconds = Math.min(bufferedSeconds(state), CRISIS_WINDOW_SECONDS);
   const { status, triggered } = evaluate({
@@ -198,10 +123,7 @@ export async function analyzeSession(
   return result;
 }
 
-/**
- * Persist an anonymised incident: metric numbers and a timestamp, nothing else.
- * No frames, no images, no identifiers beyond the ephemeral session id.
- */
+/** Persist an anonymised incident: metric numbers and a timestamp, nothing else. */
 async function recordIncident(result: AnalysisResult): Promise<string> {
   const incident: Incident = {
     id: randomUUID(),
