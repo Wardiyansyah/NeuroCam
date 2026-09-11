@@ -1,13 +1,17 @@
 import type { Metadata } from "next";
 import { FastPanel } from "@/components/fast-panel";
 import { MonitorClient } from "@/components/monitor-client";
+import { ManualMetricForm } from "@/components/manual-metric-form";
 import { CALIBRATION_SECONDS, CRISIS_WINDOW_SECONDS } from "@/lib/store";
+import { simulationEnabled } from "@/lib/simulation";
 
 export const metadata: Metadata = {
   title: "Pemantauan — SIPIJAR",
   description:
     "Pemantauan nirsentuh real-time: estimasi detak jantung via rPPG dan indeks asimetri wajah.",
 };
+
+export const dynamic = "force-dynamic";
 
 export default function MonitorPage() {
   return (
@@ -29,6 +33,7 @@ export default function MonitorPage() {
       </div>
 
       <MonitorClient />
+      {simulationEnabled() ? <ManualMetricForm /> : null}
 
       <section className="mt-10 rounded-xl border border-border-subtle bg-surface p-5">
         <h2 className="text-sm font-semibold tracking-tight">

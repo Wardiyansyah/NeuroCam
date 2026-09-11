@@ -14,10 +14,11 @@ import type { Incident } from "@/lib/types";
  */
 const POLL_INTERVAL_MS = 5000;
 
-export function IncidentTable() {
+export function IncidentTable({ simulationEnabled = false }: { simulationEnabled?: boolean }) {
   const [incidents, setIncidents] = useState<Incident[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [simulating, setSimulating] = useState<"warning" | "critical" | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -47,6 +48,65 @@ export function IncidentTable() {
     };
   }, []);
 
+  async function simulate(status: "warning" | "critical") {
+    setSimulating(status);
+    setError(null);
+    try {
+      const response = await fetch("/api/simulate/incident", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const responseText = await response.text();
+      let data: { error?: string; incident?: Incident };
+      try {
+        data = JSON.parse(responseText) as { error?: string; incident?: Incident };
+      } catch {
+        throw new Error("Respons server simulasi tidak valid.");
+      }
+      if (!response.ok || !data.incident) {
+        throw new Error(data.error ?? "Simulasi insiden gagal.");
+      }
+      setIncidents((current) => [data.incident!, ...(current ?? [])]);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Simulasi insiden gagal.");
+    } finally {
+      setSimulating(null);
+    }
+  }
+
+  if (simulationEnabled) {
+    return (
+      <>
+        <div className="mb-4 flex flex-wrap gap-2 rounded-xl border border-amber-300/40 bg-amber-50/40 p-4">
+          <span className="mr-2 self-center text-xs font-medium">Simulasi insiden:</span>
+          <button
+            type="button"
+            disabled={simulating !== null}
+            onClick={() => void simulate("warning")}
+            className="rounded-md bg-amber-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
+          >
+            {simulating === "warning" ? "Menyimpan…" : "Simulasi status warning"}
+          </button>
+          <button
+            type="button"
+            disabled={simulating !== null}
+            onClick={() => void simulate("critical")}
+            className="rounded-md bg-red-700 px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
+          >
+            {simulating === "critical" ? "Menyimpan…" : "Simulasi status critical"}
+          </button>
+        </div>
+        {error !== null ? (
+          <div className="mb-4 rounded-xl border border-dashed border-border-subtle p-4 text-sm">
+            {error}
+          </div>
+        ) : null}
+        {renderTable()}
+      </>
+    );
+  }
+
   if (error !== null) {
     return (
       <div className="rounded-xl border border-dashed border-border-subtle p-10 text-center">
@@ -73,7 +133,29 @@ export function IncidentTable() {
     );
   }
 
-  return (
+  function renderTable() {
+    if (error !== null) {
+      return (
+        <div className="rounded-xl border border-dashed border-border-subtle p-10 text-center">
+          <p className="text-sm font-medium">{error}</p>
+          <p className="mt-1.5 text-sm text-muted">Percobaan berikutnya akan berjalan otomatis.</p>
+        </div>
+      );
+    }
+    if (incidents === null) return <p className="text-sm text-muted">Memuat riwayat insiden…</p>;
+    if (incidents.length === 0) {
+      return (
+        <div className="rounded-xl border border-dashed border-border-subtle p-10 text-center">
+          <p className="text-sm font-medium">Belum ada insiden tercatat</p>
+          <p className="mx-auto mt-1.5 max-w-md text-sm leading-relaxed text-muted">
+            Insiden muncul di sini ketika sebuah sesi pemantauan melewati ambang batas
+            peringatan atau kritis. Setiap baris hanya berisi angka metrik dan stempel
+            waktu.
+          </p>
+        </div>
+      );
+    }
+    return (
     <div className="overflow-x-auto rounded-xl border border-border-subtle bg-surface">
       <table className="w-full min-w-[720px] text-sm">
         <thead>
@@ -192,5 +274,8 @@ export function IncidentTable() {
         </tbody>
       </table>
     </div>
-  );
+    );
+  }
+
+  return renderTable();
 }

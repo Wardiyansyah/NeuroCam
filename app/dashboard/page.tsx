@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import { IncidentTable } from "@/components/incident-table";
+import { simulationEnabled } from "@/lib/simulation";
 
 export const metadata: Metadata = {
   title: "Dasbor Insiden — SIPIJAR",
   description:
     "Riwayat insiden teranonimisasi: angka metrik dan stempel waktu, tanpa rekaman video.",
 };
+
+export const dynamic = "force-dynamic";
 
 export default function DashboardPage() {
   return (
@@ -19,7 +22,7 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      <IncidentTable />
+      <IncidentTable simulationEnabled={simulationEnabled()} />
     </main>
   );
 }
