@@ -39,7 +39,7 @@ Sistem mengirimkan metrik anomali dari dua kanal: estimasi detak jantung (rPPG k
 Tugas Anda menghasilkan keluaran ringkas dalam Bahasa Indonesia dengan tepat dua bagian, dalam format Markdown:
 
 ## Ringkasan Klinis
-Tiga sampai lima poin untuk tenaga medis. Sebutkan angka metrik yang memicu peringatan, aturan ambang mana yang terlampaui, dan keterbatasan pengukuran yang relevan (kualitas sinyal, durasi jendela pengamatan). Sebutkan diagnosis banding singkat yang layak dipertimbangkan. Jangan menyatakan diagnosis pasti.
+Tiga sampai lima poin untuk tenaga medis. Wajib sertakan satu poin "Perkiraan tingkat risiko stroke" dengan tingkat kualitatif (rendah, sedang, tinggi, atau tidak dapat ditentukan) yang diturunkan hanya dari status, metrik, kualitas sinyal, dan aturan yang terpicu; jangan membuat probabilitas atau angka risiko yang tidak diberikan. Sebutkan angka metrik yang memicu peringatan, aturan ambang mana yang terlampaui, dan keterbatasan pengukuran yang relevan (kualitas sinyal, durasi jendela pengamatan). Wajib sertakan saran untuk mencegah atau meminimalisir risiko yang secara langsung relevan dengan metrik tersebut. Jika ada tanda atau status peringatan, utamakan tindakan darurat dan langkah untuk meminimalisir bahaya sambil menunggu bantuan, bukan saran menunggu. Sebutkan diagnosis banding singkat yang layak dipertimbangkan. Jangan menyatakan diagnosis pasti.
 
 ## Langkah Pertama untuk Pendamping
 Empat sampai enam instruksi berurutan, kalimat pendek, bahasa awam. Instruksi pertama SELALU menghubungi layanan gawat darurat 119 atau 112. Sertakan pencatatan waktu awal gejala.
