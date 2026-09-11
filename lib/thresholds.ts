@@ -78,6 +78,8 @@ export interface EvaluationInput {
   faceTrackingRatio: number;
   /** Seconds since the session began, used to spot calibration that never converges. */
   elapsedSeconds: number;
+  /** Number of non-decreasing qualifying spikes seen in this session. */
+  increasingSpikeCount?: number;
 }
 
 export interface Evaluation {
@@ -109,6 +111,7 @@ export function evaluate(
     calibrated,
     faceTrackingRatio,
     elapsedSeconds,
+    increasingSpikeCount = 0,
   } = input;
   const triggered: TriggeredRule[] = [];
 
@@ -164,18 +167,14 @@ export function evaluate(
       });
     }
 
-    if (
-      hemodynamic.spikePct !== null &&
-      Math.abs(hemodynamic.spikePct) >= thresholds.hrCriticalSpikePct
-    ) {
+    if (increasingSpikeCount >= 3) {
       triggered.push({
-        code: "HR_SPIKE_EXTREME",
-        label: "Lonjakan metrik luar biasa",
+        code: "HR_SPIKE_ESCALATED",
+        label: "Lonjakan meningkat tiga kali",
         detail:
-          `Deviasi detak jantung ${hemodynamic.spikePct > 0 ? "+" : ""}${hemodynamic.spikePct}% ` +
-          `melewati ambang kritis ±${thresholds.hrCriticalSpikePct}%.`,
+          `Terdapat ${increasingSpikeCount} lonjakan berturut-turut yang masing-masing ` +
+          `sama atau lebih tinggi dari lonjakan sebelumnya.`,
       });
-      return { status: "critical", triggered };
     }
 
     if (
@@ -210,12 +209,12 @@ export function evaluate(
 
   // --- Combination ---------------------------------------------------------
   // Simultaneous breach on both axes is the draft's escalation condition.
-  if (hrAnomaly && asymAnomaly) {
+  if (increasingSpikeCount >= 3 && hrAnomaly && asymAnomaly) {
     return { status: "critical", triggered };
   }
   // Severe unilateral droop on its own still warrants an emergency response;
   // "F" in FAST is a stroke sign whether or not the pulse cooperates.
-  if (asymCritical) {
+  if (increasingSpikeCount >= 3 && asymCritical) {
     return { status: "critical", triggered };
   }
   if (hrAnomaly || asymAnomaly) {

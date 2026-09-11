@@ -78,7 +78,11 @@ export function MonitorClient() {
     phase === "running" ? (result?.status ?? "calibrating") : (result?.status ?? "idle");
   const display = STATUS_DISPLAY[status];
 
-  const autoStop = useCallback((reason: "signal_quality" | "extreme_spike") => {
+  const autoStop = useCallback(
+    (
+      reason: "signal_quality" | "extreme_spike",
+      completedResult: AnalysisResult,
+    ) => {
     if (autoStopRef.current) return;
     autoStopRef.current = true;
     if (rafRef.current !== null) {
@@ -87,9 +91,27 @@ export function MonitorClient() {
     }
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
-    setPhase("idle");
-    setAutoStopReason(reason);
-  }, []);
+      setPhase("idle");
+      setResult({
+        ...completedResult,
+        hemodynamic: {
+          ...completedResult.hemodynamic,
+          bpm: completedResult.averages.bpm,
+          spikePct: completedResult.averages.spikePct,
+          snrDb: completedResult.averages.snrDb,
+        },
+        asymmetry: {
+          ...completedResult.asymmetry,
+          overall: completedResult.averages.asymmetryOverall,
+          mouth: completedResult.averages.asymmetryMouth,
+          eye: completedResult.averages.asymmetryEye,
+          brow: completedResult.averages.asymmetryBrow,
+        },
+      });
+      setAutoStopReason(reason);
+    },
+    [],
+  );
 
   /** Ship the buffered samples and take the verdict back. */
   const flush = useCallback(async () => {
@@ -135,22 +157,28 @@ export function MonitorClient() {
             ? "fair"
             : "good";
       const now = performance.now();
-      if (quality && lastQualityAtRef.current !== null) {
+      if (!nextResult.calibrated) {
+        qualityProgressRef.current = 0;
+        lastQualityAtRef.current = null;
+      } else if (quality && lastQualityAtRef.current !== null) {
         qualityProgressRef.current +=
           ((now - lastQualityAtRef.current) / 1000) * QUALITY_PROGRESS[quality];
       } else if (!quality) {
         qualityProgressRef.current = 0;
       }
-      lastQualityAtRef.current = quality ? now : null;
+      if (nextResult.calibrated) {
+        lastQualityAtRef.current = quality ? now : null;
+      }
 
       const extremeSpike =
         nextResult.hemodynamic.spikePct !== null &&
         Math.abs(nextResult.hemodynamic.spikePct) >= EXTREME_SPIKE_PCT;
       if (
         !autoStopRef.current &&
+        nextResult.calibrated &&
         (qualityProgressRef.current >= QUALITY_TARGET_SECONDS || extremeSpike)
       ) {
-        autoStop(extremeSpike ? "extreme_spike" : "signal_quality");
+        autoStop(extremeSpike ? "extreme_spike" : "signal_quality", nextResult);
       }
     } catch {
       // A dropped batch is recoverable - the next one carries fresh signal.

@@ -23,6 +23,7 @@ const RESULT: AnalysisResult = {
   averages: {
     samples: 3,
     bpm: 110,
+    spikePct: 52.8,
     asymmetryOverall: 42,
     asymmetryMouth: 44,
     asymmetryEye: 39,

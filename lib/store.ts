@@ -57,12 +57,16 @@ export interface SessionState {
     count: number;
     bpmSum: number;
     bpmCount: number;
+    spikePctSum: number;
+    spikePctCount: number;
     asymmetryOverallSum: number;
     asymmetryMouthSum: number;
     asymmetryEyeSum: number;
     asymmetryBrowSum: number;
     snrDbSum: number;
   };
+  increasingSpikeCount: number;
+  previousSpikeMagnitude: number | null;
 }
 
 export interface SessionStore {
@@ -158,6 +162,8 @@ export const sessionStore: SessionStore = {
       calibrationAsymmetry: [],
       calibrated: false,
       metricAggregate: undefined,
+      increasingSpikeCount: 0,
+      previousSpikeMagnitude: null,
     };
 
     sessions.set(state.meta.id, state);
@@ -185,6 +191,7 @@ export function metricAverages(state: SessionState): MetricAverages {
     return {
       samples: 0,
       bpm: null,
+      spikePct: null,
       asymmetryOverall: 0,
       asymmetryMouth: 0,
       asymmetryEye: 0,
@@ -198,6 +205,10 @@ export function metricAverages(state: SessionState): MetricAverages {
     bpm:
       aggregate.bpmCount > 0
         ? Number((aggregate.bpmSum / aggregate.bpmCount).toFixed(1))
+        : null,
+    spikePct:
+      aggregate.spikePctCount > 0
+        ? Number((aggregate.spikePctSum / aggregate.spikePctCount).toFixed(1))
         : null,
     asymmetryOverall: Number((aggregate.asymmetryOverallSum / aggregate.count).toFixed(1)),
     asymmetryMouth: Number((aggregate.asymmetryMouthSum / aggregate.count).toFixed(1)),

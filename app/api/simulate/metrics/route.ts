@@ -76,6 +76,7 @@ export async function POST(request: Request) {
     averages: {
       samples: 1,
       bpm: values.heartRate,
+      spikePct: hemodynamic.spikePct,
       asymmetryOverall: values.asymmetryIndex,
       asymmetryMouth: values.au12,
       asymmetryEye: values.au6_7,

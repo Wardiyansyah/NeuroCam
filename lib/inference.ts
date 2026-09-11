@@ -88,6 +88,30 @@ export async function analyzeSession(
         : null,
   };
 
+  // Only upward BPM deviations can form the escalating critical sequence.
+  // A falling BPM remains an anomaly, but never advances that sequence.
+  const spikeMagnitude =
+    hemodynamic.spikePct !== null &&
+    hemodynamic.bpm !== null &&
+    hemodynamic.baselineBpm !== null &&
+    hemodynamic.bpm > hemodynamic.baselineBpm &&
+    hemodynamic.spikePct >= 30
+      ? hemodynamic.spikePct
+      : null;
+  if (spikeMagnitude === null) {
+    state.increasingSpikeCount = 0;
+    state.previousSpikeMagnitude = null;
+  } else if (
+    state.previousSpikeMagnitude !== null &&
+    spikeMagnitude >= state.previousSpikeMagnitude
+  ) {
+    state.increasingSpikeCount += 1;
+    state.previousSpikeMagnitude = spikeMagnitude;
+  } else {
+    state.increasingSpikeCount = 1;
+    state.previousSpikeMagnitude = spikeMagnitude;
+  }
+
   const asymmetry = applyBaseline(asymmetryRaw, state.baselineAsymmetry);
   const gateWindow = windowOf(state, FACE_GATE_SECONDS);
   const faceTrackingRatio =
@@ -103,7 +127,37 @@ export async function analyzeSession(
     calibrated: state.calibrated,
     faceTrackingRatio,
     elapsedSeconds,
+    increasingSpikeCount: state.increasingSpikeCount,
   });
+
+  if (state.calibrated) {
+    const aggregate = (state.metricAggregate ??= {
+      count: 0,
+      bpmSum: 0,
+      bpmCount: 0,
+      spikePctSum: 0,
+      spikePctCount: 0,
+      asymmetryOverallSum: 0,
+      asymmetryMouthSum: 0,
+      asymmetryEyeSum: 0,
+      asymmetryBrowSum: 0,
+      snrDbSum: 0,
+    });
+    aggregate.count += 1;
+    if (hemodynamic.bpm !== null) {
+      aggregate.bpmSum += hemodynamic.bpm;
+      aggregate.bpmCount += 1;
+    }
+    if (hemodynamic.spikePct !== null) {
+      aggregate.spikePctSum += hemodynamic.spikePct;
+      aggregate.spikePctCount += 1;
+    }
+    aggregate.asymmetryOverallSum += asymmetry.overall;
+    aggregate.asymmetryMouthSum += asymmetry.mouth;
+    aggregate.asymmetryEyeSum += asymmetry.eye;
+    aggregate.asymmetryBrowSum += asymmetry.brow;
+    aggregate.snrDbSum += hemodynamic.snrDb;
+  }
 
   const result: AnalysisResult = {
     sessionId: state.meta.id,
@@ -116,27 +170,6 @@ export async function analyzeSession(
     calibrated: state.calibrated,
     averages: metricAverages(state),
   };
-
-  const aggregate = (state.metricAggregate ??= {
-    count: 0,
-    bpmSum: 0,
-    bpmCount: 0,
-    asymmetryOverallSum: 0,
-    asymmetryMouthSum: 0,
-    asymmetryEyeSum: 0,
-    asymmetryBrowSum: 0,
-    snrDbSum: 0,
-  });
-  aggregate.count += 1;
-  if (hemodynamic.bpm !== null) {
-    aggregate.bpmSum += hemodynamic.bpm;
-    aggregate.bpmCount += 1;
-  }
-  aggregate.asymmetryOverallSum += asymmetry.overall;
-  aggregate.asymmetryMouthSum += asymmetry.mouth;
-  aggregate.asymmetryEyeSum += asymmetry.eye;
-  aggregate.asymmetryBrowSum += asymmetry.brow;
-  aggregate.snrDbSum += hemodynamic.snrDb;
   result.averages = metricAverages(state);
 
   if (status === "critical" || status === "warning") {

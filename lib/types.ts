@@ -106,6 +106,7 @@ export interface AnalysisResult {
 export interface MetricAverages {
   samples: number;
   bpm: number | null;
+  spikePct: number | null;
   asymmetryOverall: number;
   asymmetryMouth: number;
   asymmetryEye: number;
