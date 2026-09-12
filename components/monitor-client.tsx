@@ -29,8 +29,8 @@ const FLUSH_INTERVAL_MS = 1000;
 const DETECT_EVERY_N_FRAMES = 10;
 const QUALITY_TARGET_SECONDS = 1;
 const QUALITY_PROGRESS: Record<Extract<SignalQuality, "fair" | "good">, number> = {
-  fair: 1 / 20,
-  good: 1 / 10,
+  fair: 1 / 10,
+  good: 1 / 5,
 };
 const EXTREME_SPIKE_PCT = 50;
 

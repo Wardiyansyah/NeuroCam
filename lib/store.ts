@@ -45,6 +45,8 @@ export interface SessionState {
   /** Rolling window of reduced frames. Never contains pixels. */
   samples: RoiSample[];
   baselineBpm: number | null;
+  /** Last accepted pulse estimate, used to reject abrupt spectral jumps. */
+  lastPulseBpm: number | null;
   baselineAsymmetry: AsymmetryScores | null;
   /** Heart-rate readings collected during calibration. */
   calibrationBpm: number[];
@@ -157,6 +159,7 @@ export const sessionStore: SessionStore = {
       meta: { id: randomUUID(), startedAt: now, lastSeenAt: now, fps },
       samples: [],
       baselineBpm: null,
+      lastPulseBpm: null,
       baselineAsymmetry: null,
       calibrationBpm: [],
       calibrationAsymmetry: [],

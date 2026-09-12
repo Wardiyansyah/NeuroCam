@@ -28,6 +28,8 @@ const FFT_PAD = 2048;
 
 /** Half-width, in Hz, of the band counted as "signal" around a spectral peak. */
 const PEAK_HALF_WIDTH_HZ = 0.1;
+const MIN_USABLE_SNR_DB = 10;
+const MAX_BPM_STEP = 18;
 
 export interface PulseEstimate {
   bpm: number | null;
@@ -83,8 +85,8 @@ function effectiveFps(times: number[], fallback: number): number {
 
 function qualityFromSnr(snrDb: number, faceRatio: number): SignalQuality {
   if (faceRatio < 0.6) return "poor";
-  if (snrDb >= 3) return "good";
-  if (snrDb >= 0) return "fair";
+  if (snrDb >= MIN_USABLE_SNR_DB) return "good";
+  if (snrDb >= MIN_USABLE_SNR_DB - 2) return "fair";
   return "poor";
 }
 
@@ -93,7 +95,11 @@ function qualityFromSnr(snrDb: number, faceRatio: number): SignalQuality {
  * Returns `bpm: null` whenever the signal does not support a call - the caller
  * must treat that as "unknown", never as "normal".
  */
-export function estimatePulse(samples: RoiSample[], nominalFps: number): PulseEstimate {
+export function estimatePulse(
+  samples: RoiSample[],
+  nominalFps: number,
+  previousBpm: number | null = null,
+): PulseEstimate {
   const usable = samples.filter((s) => s.faceFound);
   const faceRatio = samples.length === 0 ? 0 : usable.length / samples.length;
 
@@ -143,8 +149,19 @@ export function estimatePulse(samples: RoiSample[], nominalFps: number): PulseEs
     return { bpm: null, snrDb: -Infinity, quality: "poor", fps };
   }
 
-  let peakBin = loBin;
-  for (let k = loBin; k <= hiBin; k++) {
+  const continuityLo =
+    previousBpm === null
+      ? loBin
+      : Math.max(loBin, Math.ceil((previousBpm / 60 - MAX_BPM_STEP / 60) / binHz));
+  const continuityHi =
+    previousBpm === null
+      ? hiBin
+      : Math.min(hiBin, Math.floor((previousBpm / 60 + MAX_BPM_STEP / 60) / binHz));
+  const searchLo = continuityLo <= continuityHi ? continuityLo : loBin;
+  const searchHi = continuityLo <= continuityHi ? continuityHi : hiBin;
+
+  let peakBin = searchLo;
+  for (let k = searchLo; k <= searchHi; k++) {
     if (power[k] > power[peakBin]) peakBin = k;
   }
   const peakHz = peakBin * binHz;
@@ -153,22 +170,31 @@ export function estimatePulse(samples: RoiSample[], nominalFps: number): PulseEs
   // against everything else in the band.
   const halfWidth = Math.max(1, Math.round(PEAK_HALF_WIDTH_HZ / binHz));
   let signalPower = 0;
-  let noisePower = 0;
+  const noiseBins: number[] = [];
   for (let k = loBin; k <= hiBin; k++) {
     const nearFundamental = Math.abs(k - peakBin) <= halfWidth;
     const nearHarmonic = Math.abs(k - 2 * peakBin) <= halfWidth;
     if (nearFundamental || nearHarmonic) signalPower += power[k];
-    else noisePower += power[k];
+    else noiseBins.push(power[k]);
   }
+
+  // Normalize the noise energy to the same number of bins as the signal.
+  // This preserves the broad-band rejection of the original detector without
+  // letting FFT length alone make every narrow peak look highly significant.
+  const noisePower =
+    noiseBins.length === 0
+      ? 0
+      : (noiseBins.reduce((sum, value) => sum + value, 0) / noiseBins.length) *
+        (halfWidth * 2 + 1);
 
   const snrDb =
     noisePower <= 0 || signalPower <= 0
       ? -Infinity
-      : (10 * Math.log10(signalPower / noisePower)) + 7;
+      : 10 * Math.log10(signalPower / noisePower);
 
   const quality = qualityFromSnr(snrDb, faceRatio);
   // A poor-quality spectrum yields a number, but not one worth acting on.
-  const bpm = quality === "poor" ? null : Math.round(peakHz * 60); //simulasi anomali warning
+  const bpm = quality === "poor" ? null : Math.round(peakHz * 60);
 
   return { bpm, snrDb, quality, fps };
 }

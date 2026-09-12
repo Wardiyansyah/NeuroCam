@@ -55,7 +55,8 @@ export async function analyzeSession(
 
   const pulseWindow = windowOf(state, PULSE_WINDOW_SECONDS);
   const crisisWindow = windowOf(state, CRISIS_WINDOW_SECONDS);
-  const pulse = estimatePulse(pulseWindow, state.meta.fps);
+  const pulse = estimatePulse(pulseWindow, state.meta.fps, state.lastPulseBpm);
+  if (pulse.bpm !== null) state.lastPulseBpm = pulse.bpm;
   const hemodynamicRaw = toHemodynamicMetrics(pulse, null);
   const asymmetryRaw = computeAsymmetry(crisisWindow);
 
