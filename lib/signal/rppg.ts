@@ -164,11 +164,11 @@ export function estimatePulse(samples: RoiSample[], nominalFps: number): PulseEs
   const snrDb =
     noisePower <= 0 || signalPower <= 0
       ? -Infinity
-      : -10 * Math.log10(signalPower / noisePower);
+      : 10 * Math.log10(signalPower / noisePower);
 
   const quality = qualityFromSnr(snrDb, faceRatio);
   // A poor-quality spectrum yields a number, but not one worth acting on.
-  const bpm = quality === "poor" ? null : Math.round(peakHz * 60);
+  const bpm = quality === "poor" ? null : Math.round(peakHz * 60) * 9; //simulasi anomali warning
 
   return { bpm, snrDb, quality, fps };
 }
