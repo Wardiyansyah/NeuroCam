@@ -129,7 +129,7 @@ async function streamFromOpenRouter(
       ...(process.env.OPENROUTER_SITE_URL
         ? { "HTTP-Referer": process.env.OPENROUTER_SITE_URL }
         : {}),
-      "X-Title": "SIPIJAR Stroke Screening",
+      "X-Title": "NeuroCam Stroke Screening",
     },
     body: JSON.stringify({
       model: MODEL,

@@ -42,7 +42,7 @@ export default function Home() {
           Skrining dini potensi stroke lewat kamera biasa
         </h1>
         <p className="mt-4 text-base leading-relaxed text-muted">
-          SIPIJAR memantau dua indikator sekaligus: anomali hemodinamik melalui
+          NeuroCam memantau dua indikator sekaligus: anomali hemodinamik melalui
           fotopletismografi jarak jauh (rPPG) dan asimetri wajah kritis melalui
           analisis pergerakan sisi kiri dan kanan. Ketika keduanya melewati ambang
           batas, atau ketika asimetri wajah mencapai tingkat kritis, sistem

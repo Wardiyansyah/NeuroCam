@@ -3,7 +3,7 @@ import { IncidentTable } from "@/components/incident-table";
 import { simulationEnabled } from "@/lib/simulation";
 
 export const metadata: Metadata = {
-  title: "Dasbor Insiden — SIPIJAR",
+  title: "Dasbor Insiden — NeuroCam",
   description:
     "Riwayat insiden teranonimisasi: angka metrik dan stempel waktu, tanpa rekaman video.",
 };

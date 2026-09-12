@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SIPIJAR - Skrining Dini Potensi Stroke",
+  title: "NeuroCam - Skrining Dini Potensi Stroke",
   description:
     "Pemantauan nirsentuh berbasis citra wajah: estimasi hemodinamik (rPPG) dan indeks asimetri wajah, dengan panduan triase FAST.",
 };
@@ -39,9 +39,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                 aria-hidden="true"
                 className="grid h-7 w-7 place-items-center rounded-md bg-accent text-[13px] font-bold text-white"
               >
-                S
+                NC
               </span>
-              <span className="text-sm font-semibold tracking-tight">SIPIJAR</span>
+              <span className="text-sm font-semibold tracking-tight">NeuroCam</span>
             </Link>
 
             <nav className="flex items-center gap-1 text-sm">

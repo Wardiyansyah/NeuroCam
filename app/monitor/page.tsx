@@ -6,7 +6,7 @@ import { CALIBRATION_SECONDS, CRISIS_WINDOW_SECONDS } from "@/lib/store";
 import { simulationEnabled } from "@/lib/simulation";
 
 export const metadata: Metadata = {
-  title: "Pemantauan — SIPIJAR",
+  title: "Pemantauan — NeuroCam",
   description:
     "Pemantauan nirsentuh real-time: estimasi detak jantung via rPPG dan indeks asimetri wajah.",
 };

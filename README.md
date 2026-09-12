@@ -1,4 +1,4 @@
-# SIPIJAR — Skrining Dini Potensi Stroke Berbasis Citra Wajah
+# NeuroCam — Skrining Dini Potensi Stroke Berbasis Citra Wajah
 
 Implementasi draft "Pendeteksi dini potensi stroke berdasarkan citra wajah berbasis AI"
 di atas Next.js 16 (App Router, Turbopack, React 19).
