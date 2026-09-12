@@ -30,6 +30,8 @@ const FFT_PAD = 2048;
 const PEAK_HALF_WIDTH_HZ = 0.1;
 const MIN_USABLE_SNR_DB = 10;
 const MAX_BPM_STEP = 18;
+/** A frozen image has no usable temporal pulse variation. */
+const MIN_PULSE_STD = 0.0005;
 
 export interface PulseEstimate {
   bpm: number | null;
@@ -133,7 +135,11 @@ export function estimatePulse(
   const sx = std(x);
   const sy = std(y);
   const alpha = sy === 0 ? 0 : sx / sy;
-  const pulse = hann(detrend(x.map((v, i) => v - alpha * y[i])));
+  const chromPulse = detrend(x.map((v, i) => v - alpha * y[i]));
+  if (std(chromPulse) < MIN_PULSE_STD) {
+    return { bpm: null, snrDb: -Infinity, quality: "poor", fps };
+  }
+  const pulse = hann(chromPulse);
 
   if (pulse.length < MIN_FRAMES) {
     return { bpm: null, snrDb: -Infinity, quality: "poor", fps };

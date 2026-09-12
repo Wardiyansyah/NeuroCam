@@ -98,7 +98,18 @@ console.log("\n3. Face lost — must report poor, never a number");
   check("all frames faceFound=false", est.bpm === null, `bpm ${est.bpm ?? "null"}`);
 }
 
-console.log("\n4. Asymmetry — symmetric vs unilateral suppression");
+console.log("\n4. Static image — must not produce a pulse estimate");
+{
+  const samples = synth({ bpm: 72, seconds: 12, fps: 30, depth: 0, noise: 0 });
+  const est = estimatePulse(samples, 30);
+  check(
+    "frozen face",
+    est.quality === "poor" && est.bpm === null,
+    `quality ${est.quality}, bpm ${est.bpm ?? "null"}`,
+  );
+}
+
+console.log("\n5. Asymmetry — symmetric vs unilateral suppression");
 {
   const symmetric = synth({ bpm: 72, seconds: 6, fps: 30, depth: 0.008, noise: 0.3 });
   const symScores = computeAsymmetry(symmetric);
@@ -133,7 +144,7 @@ console.log("\n4. Asymmetry — symmetric vs unilateral suppression");
   );
 }
 
-console.log("\n5. Threshold evaluation");
+console.log("\n6. Threshold evaluation");
 {
   const good = { quality: "good" as const };
   const base = {
@@ -230,7 +241,7 @@ console.log("\n5. Threshold evaluation");
   );
 }
 
-console.log("\n6. Metric assembly");
+console.log("\n7. Metric assembly");
 {
   const est = estimatePulse(
     synth({ bpm: 96, seconds: 12, fps: 30, depth: 0.008, noise: 0.3 }),
