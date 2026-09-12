@@ -21,7 +21,7 @@ const PIPELINE = [
   {
     step: "4",
     title: "Evaluasi ambang batas",
-    body: `Agregasi ${CRISIS_WINDOW_SECONDS} detik terakhir. Bila fluktuasi detak jantung dan asimetri wajah terlampaui bersamaan, status menjadi Kritis.`,
+    body: `Agregasi ${CRISIS_WINDOW_SECONDS} detik terakhir. Bila kedua kanal terlampaui bersamaan atau asimetri wajah mencapai ambang tinggi, status menjadi Kritis.`,
   },
   {
     step: "5",
@@ -45,8 +45,8 @@ export default function Home() {
           SIPIJAR memantau dua indikator sekaligus: anomali hemodinamik melalui
           fotopletismografi jarak jauh (rPPG) dan asimetri wajah kritis melalui
           analisis pergerakan sisi kiri dan kanan. Ketika keduanya melewati ambang
-          batas secara bersamaan, sistem memunculkan peringatan dan panduan
-          penanganan pertama.
+          batas, atau ketika asimetri wajah mencapai tingkat kritis, sistem
+          memunculkan status dan panduan penanganan pertama.
         </p>
 
         <div className="mt-7 flex flex-wrap gap-3">

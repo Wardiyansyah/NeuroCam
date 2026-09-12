@@ -12,6 +12,8 @@
  *
  * Every number here is a screening heuristic chosen to be legible and tunable.
  * None of it is clinically validated - see README.
+ * High facial asymmetry is also critical on its
+ * own because it is the facial sign in the FAST protocol.
  */
 
 import type {
@@ -208,13 +210,14 @@ export function evaluate(
   }
 
   // --- Combination ---------------------------------------------------------
-  // Simultaneous breach on both axes is the draft's escalation condition.
-  if (increasingSpikeCount >= 3 && hrAnomaly && asymAnomaly) {
+  // High facial asymmetry is itself an emergency FAST finding; it must not
+  // wait for a separate heart-rate escalation before becoming critical.
+  if (asymCritical) {
     return { status: "critical", triggered };
   }
-  // Severe unilateral droop on its own still warrants an emergency response;
-  // "F" in FAST is a stroke sign whether or not the pulse cooperates.
-  if (increasingSpikeCount >= 3 && asymCritical) {
+
+  // Simultaneous breach on both axes is the draft's escalation condition.
+  if (hrAnomaly && asymAnomaly) {
     return { status: "critical", triggered };
   }
   if (hrAnomaly || asymAnomaly) {
