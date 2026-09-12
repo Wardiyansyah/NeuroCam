@@ -8,15 +8,15 @@
 
 import { incidentStore } from "@/lib/store";
 
-const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
 export async function GET(request: Request) {
   const raw = new URL(request.url).searchParams.get("limit");
-  const parsed = Number(raw);
-  const limit = Number.isFinite(parsed)
-    ? Math.min(MAX_LIMIT, Math.max(1, Math.floor(parsed)))
-    : DEFAULT_LIMIT;
+  const parsed = raw === null ? null : Number(raw);
+  const limit =
+    parsed !== null && Number.isFinite(parsed)
+      ? Math.min(MAX_LIMIT, Math.max(1, Math.floor(parsed)))
+      : undefined;
 
   try {
     const incidents = await incidentStore.list(limit);

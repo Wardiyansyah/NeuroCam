@@ -223,30 +223,89 @@ export function metricAverages(state: SessionState): MetricAverages {
 
 export const incidentStore: IncidentStore = {
   async append(incident: Incident) {
-    incidents.unshift(incident);
+    const existingIndex = incidents.findIndex(
+      (storedIncident) => storedIncident.sessionId === incident.sessionId,
+    );
+    if (existingIndex >= 0) {
+      Object.assign(incidents[existingIndex], incident);
+    } else {
+      incidents.unshift(incident);
+    }
     // Keep the demo store bounded; a real backend would page instead.
     if (incidents.length > 200) incidents.length = 200;
 
     const pool = getPostgresPool();
     if (pool) {
-      await pool.query(
-        `INSERT INTO public.face_scan_metrics (
-           session_id, heart_rate_bpm, asymmetry_index, au12_mouth,
-           au6_7_eye, au4_eyebrow, scan_status, scan_notes, triggered_rules
-         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [
-          incident.sessionId,
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtext($1))",
+          [incident.sessionId],
+        );
+
+        const existing = await client.query<{ id: string }>(
+          `SELECT id
+           FROM public.face_scan_metrics
+           WHERE session_id = $1
+           ORDER BY created_at ASC
+           LIMIT 1`,
+          [incident.sessionId],
+        );
+        const values = [
+          incident.at,
           incident.metrics.bpm,
           incident.metrics.asymmetryOverall,
           incident.metrics.asymmetryMouth,
           incident.metrics.asymmetryEye,
           incident.metrics.asymmetryBrow,
           incident.status,
-          null,
           JSON.stringify(incident.triggered),
-        ],
-      );
+          incident.sessionId,
+        ];
+
+        if (existing.rows[0]) {
+          await client.query(
+            `UPDATE public.face_scan_metrics
+             SET created_at = $1,
+                 heart_rate_bpm = $2,
+                 asymmetry_index = $3,
+                 au12_mouth = $4,
+                 au6_7_eye = $5,
+                 au4_eyebrow = $6,
+                 scan_status = $7,
+                 triggered_rules = $8
+             WHERE id = $9`,
+            [...values.slice(0, 8), existing.rows[0].id],
+          );
+          await client.query(
+            `DELETE FROM public.face_scan_metrics
+             WHERE session_id = $1 AND id <> $2`,
+            [incident.sessionId, existing.rows[0].id],
+          );
+        } else {
+          await client.query(
+            `INSERT INTO public.face_scan_metrics (
+               session_id, created_at, heart_rate_bpm, asymmetry_index, au12_mouth,
+               au6_7_eye, au4_eyebrow, scan_status, scan_notes, triggered_rules
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [
+              incident.sessionId,
+              incident.at,
+              ...values.slice(1, 7),
+              null,
+              values[7],
+            ],
+          );
+        }
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
     }
   },
 
@@ -268,16 +327,16 @@ export const incidentStore: IncidentStore = {
     }
   },
 
-  async list(limit = 50) {
+  async list(limit?: number) {
     const pool = getPostgresPool();
     if (pool) {
+      const query = `SELECT *
+        FROM public.face_scan_metrics
+        WHERE LOWER(scan_status) IN ('warning', 'critical')
+        ORDER BY created_at DESC${limit === undefined ? "" : " LIMIT $1"}`;
       const result = await pool.query<Record<string, unknown>>(
-        `SELECT *
-         FROM public.face_scan_metrics
-         WHERE LOWER(scan_status) IN ('warning', 'critical')
-         ORDER BY created_at DESC
-         LIMIT $1`,
-        [limit],
+        query,
+        limit === undefined ? [] : [limit],
       );
 
       return result.rows
@@ -285,7 +344,7 @@ export const incidentStore: IncidentStore = {
         .filter((incident): incident is Incident => incident !== null);
     }
 
-    return incidents.slice(0, limit);
+    return limit === undefined ? incidents : incidents.slice(0, limit);
   },
 };
 
